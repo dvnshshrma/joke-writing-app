@@ -4,8 +4,9 @@ A web application for stand-up comedians to organize, edit, and manage versions 
 
 ## Features
 
-- **Joke Writing**: Write, edit, and manage your jokes with version control
+- **Joke Writing**: Write, edit, and manage your jokes with version control and feeback
 - **Set Management**: Organize and work on your stand-up sets
+- **Analyse Your Sets**: Put your audios and videos in, and AI will analyse your jokes and sets based on metrics like Laughs Per Joke, Engagement Per Joke etc. 
 
 ## Getting Started
 
