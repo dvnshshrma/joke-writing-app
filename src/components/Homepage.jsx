@@ -1,0 +1,38 @@
+import { useNavigate } from 'react-router-dom'
+import './Homepage.css'
+
+function Homepage() {
+  const navigate = useNavigate()
+
+  return (
+    <div className="homepage">
+      <div className="homepage-container">
+        <h1 className="app-title">Comedica</h1>
+        <p className="app-subtitle">Your companion for writing jokes and managing sets</p>
+        
+        <div className="options-container">
+          <button 
+            className="option-card joke-option"
+            onClick={() => navigate('/joke')}
+          >
+            <div className="option-icon">😄</div>
+            <h2>Joke</h2>
+            <p>Write, edit, and manage your jokes</p>
+          </button>
+          
+          <button 
+            className="option-card set-option"
+            onClick={() => navigate('/set')}
+          >
+            <div className="option-icon">🎤</div>
+            <h2>Set</h2>
+            <p>Let's work on a set</p>
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default Homepage
+
