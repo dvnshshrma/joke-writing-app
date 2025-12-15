@@ -50,3 +50,62 @@
   padding: 2rem;
 }
 
+.set-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+  margin-top: 2rem;
+}
+
+.set-option-btn {
+  background: white;
+  border: none;
+  border-radius: 16px;
+  padding: 3rem 2rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+  text-align: center;
+}
+
+.set-option-btn:hover {
+  transform: translateY(-8px);
+  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.3);
+}
+
+.set-option-btn .option-icon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+}
+
+.set-option-btn h2 {
+  font-size: 2rem;
+  color: #333;
+  margin-bottom: 0.5rem;
+}
+
+.set-option-btn p {
+  font-size: 1rem;
+  color: #666;
+}
+
+.set-option-btn.short-set:hover {
+  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+  color: white;
+}
+
+.set-option-btn.short-set:hover h2,
+.set-option-btn.short-set:hover p {
+  color: white;
+}
+
+.set-option-btn.long-set:hover {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  color: white;
+}
+
+.set-option-btn.long-set:hover h2,
+.set-option-btn.long-set:hover p {
+  color: white;
+}
+

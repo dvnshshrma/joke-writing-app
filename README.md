@@ -12,8 +12,11 @@ A web application for stand-up comedians to organize, edit, and manage versions 
 - **Draft & Finalize**: Save jokes as drafts or finalize them
 - **Version Control**: All edits, comments, and revisions are saved with timestamps
 
-### 🚧 Set Management (Coming Soon)
-- Organize and work on your stand-up sets
+### ✅ Set Management (Implemented)
+- **Short Sets**: Create sets for open mics by selecting and ordering jokes
+- **Set Header**: Define the bigger idea behind your set
+- **Joke Selection**: Choose from all your saved jokes
+- **Sequential Ordering**: Arrange jokes in your performance order
 
 ### 🚧 AI Analysis (Coming Soon)
 - Analyze your audio and video performances
@@ -28,17 +31,64 @@ A web application for stand-up comedians to organize, edit, and manage versions 
 
 ### Installation
 
-1. Install dependencies:
+#### 1. Install Frontend Dependencies
+
 ```bash
 npm install
 ```
 
-2. Start the development server:
+#### 2. Install Backend Dependencies
+
+```bash
+cd server
+npm install
+cd ..
+```
+
+#### 3. Set Up Supabase Database
+
+1. Create a free account at https://supabase.com/dashboard
+2. Create a new project
+3. Get your Project URL and anon key from Settings > API
+4. Create database tables (see `SETUP.md` for SQL scripts)
+
+#### 4. Configure Environment
+
+Create `server/.env`:
+```env
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your_anon_key_here
+DB_NAME=comedica
+PORT=3001
+```
+
+#### 5. Start the Backend Server
+
+```bash
+cd server
+npm start
+```
+
+The server will run on `http://localhost:3001`
+
+#### 6. Start the Frontend Development Server
+
+In a new terminal:
+
 ```bash
 npm run dev
 ```
 
-3. Open your browser and navigate to `http://localhost:5173`
+#### 7. Open Your Browser
+
+Navigate to `http://localhost:5173`
+
+### Database
+
+- The backend uses **Supabase** (PostgreSQL) for cloud storage
+- Data persists across app restarts and devices
+- Free tier includes 500MB database and 2GB bandwidth
+- See `SETUP.md` for detailed setup instructions
 
 ### Build for Production
 
@@ -96,13 +146,16 @@ The built files will be in the `dist` directory.
 
 ### Data Storage
 
-All jokes are saved to your browser's localStorage, including:
-- Joke content (header, context, punchline)
+All jokes and sets are saved in **Supabase** (PostgreSQL cloud database), ensuring your data persists across sessions and devices:
+- Joke content (header, sections with contexts and punchlines)
 - Draft/final status
 - Comments per line
 - Strike-through markings
 - Replacement texts
+- Sets with selected jokes
 - Timestamps (created and updated)
+
+See `SETUP.md` for database setup instructions.
 
 ## Project Structure
 
@@ -129,17 +182,38 @@ joke-writing-app/
 ### ✅ Completed
 - Homepage with navigation
 - Joke Writing section with two main options
-- New joke editor with Context and Punchline sections
+- New joke editor with multiple Context and Punchline sections
 - Line-by-line commenting system
 - Strike-through and replacement functionality
 - Draft and finalize save options
 - Old jokes list and detail view
 - Edit existing jokes functionality
-- LocalStorage persistence
+- Short Set editor for open mics
+- Cloud database persistence (Supabase)
+- RESTful API backend
 
 ### 🚧 In Progress / Planned
-- Set Management features
+- Long Set editor
 - AI integration for joke editing assistance
 - Performance analysis tools
 - Export/import functionality
-- Cloud sync capabilities
+- Set performance tracking
+
+## API Endpoints
+
+The backend provides REST API endpoints:
+
+### Jokes
+- `GET /api/jokes` - Get all jokes
+- `GET /api/jokes/:id` - Get a specific joke
+- `POST /api/jokes` - Create a new joke
+- `PUT /api/jokes/:id` - Update an existing joke
+- `DELETE /api/jokes/:id` - Delete a joke
+
+### Sets
+- `GET /api/sets` - Get all sets
+- `GET /api/sets/:id` - Get a specific set
+- `POST /api/sets` - Create a new set
+- `PUT /api/sets/:id` - Update an existing set
+- `DELETE /api/sets/:id` - Delete a set
+

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { jokesAPI } from '../services/api'
 import './OldJokesList.css'
 
 function OldJokesList({ onBack, onEdit }) {
@@ -13,23 +14,36 @@ function OldJokesList({ onBack, onEdit }) {
     loadJokes()
   }, [])
 
-  const loadJokes = () => {
-    const savedJokes = JSON.parse(localStorage.getItem('comedica_jokes') || '[]')
-    setJokes(savedJokes)
+  const loadJokes = async () => {
+    try {
+      const savedJokes = await jokesAPI.getAll()
+      setJokes(savedJokes)
+    } catch (error) {
+      console.error('Error loading jokes:', error)
+      // Fallback to localStorage if API fails
+      const savedJokes = JSON.parse(localStorage.getItem('comedica_jokes') || '[]')
+      setJokes(savedJokes)
+      alert('Warning: Could not connect to server. Using local storage. Your data may not be saved.')
+    }
   }
 
   const handleJokeClick = (joke) => {
     setSelectedJoke(joke)
   }
 
-  const handleDeleteJoke = (jokeId, e) => {
+  const handleDeleteJoke = async (jokeId, e) => {
     e.stopPropagation()
     if (window.confirm('Are you sure you want to delete this joke?')) {
-      const updatedJokes = jokes.filter(joke => joke.id !== jokeId)
-      localStorage.setItem('comedica_jokes', JSON.stringify(updatedJokes))
-      setJokes(updatedJokes)
-      if (selectedJoke && selectedJoke.id === jokeId) {
-        setSelectedJoke(null)
+      try {
+        await jokesAPI.delete(jokeId)
+        const updatedJokes = jokes.filter(joke => joke.id !== jokeId)
+        setJokes(updatedJokes)
+        if (selectedJoke && selectedJoke.id === jokeId) {
+          setSelectedJoke(null)
+        }
+      } catch (error) {
+        console.error('Error deleting joke:', error)
+        alert('Failed to delete joke. Please try again.')
       }
     }
   }
@@ -42,6 +56,23 @@ function OldJokesList({ onBack, onEdit }) {
       hour: '2-digit',
       minute: '2-digit'
     })
+  }
+
+  const getJokePreview = (joke) => {
+    // Handle new ordered format (sections array)
+    if (joke.sections && joke.sections.length > 0) {
+      const firstSection = joke.sections.find(s => s.type === 'context') || joke.sections[0]
+      return firstSection.text ? firstSection.text.substring(0, 50) : 'No content...'
+    }
+    // Handle intermediate format (separate arrays)
+    if (joke.contexts && joke.contexts.length > 0) {
+      return joke.contexts[0].text.substring(0, 50)
+    }
+    // Handle old format (string)
+    if (joke.context) {
+      return joke.context.substring(0, 50)
+    }
+    return 'No content...'
   }
 
   return (
@@ -78,7 +109,7 @@ function OldJokesList({ onBack, onEdit }) {
                 <span className="joke-date">{formatDate(joke.updatedAt)}</span>
               </div>
               <p className="joke-preview">
-                {joke.context.substring(0, 50)}...
+                {getJokePreview(joke)}...
               </p>
             </div>
           ))}
@@ -94,15 +125,65 @@ function OldJokesList({ onBack, onEdit }) {
             </div>
             
             <div className="joke-detail-body">
-              <div className="joke-section-detail">
-                <h3 className="section-label-detail context-label">Context</h3>
-                <p className="joke-text-detail context-text">{selectedJoke.context}</p>
-              </div>
+              {/* Handle new ordered format (sections array) */}
+              {selectedJoke.sections && selectedJoke.sections.length > 0 && (
+                selectedJoke.sections.map((section, index) => {
+                  // Count how many sections of this type have appeared before this one (including this one)
+                  let sectionNumber = 0
+                  for (let i = 0; i <= index; i++) {
+                    if (selectedJoke.sections[i].type === section.type) {
+                      sectionNumber++
+                    }
+                  }
+                  
+                  return (
+                    <div key={section.id || index} className="joke-section-detail">
+                      <h3 className={`section-label-detail ${section.type}-label`}>
+                        {section.type === 'context' ? 'Context' : 'Punchline'} #{sectionNumber}
+                      </h3>
+                      <p className={`joke-text-detail ${section.type}-text`}>{section.text}</p>
+                    </div>
+                  )
+                })
+              )}
+              
+              {/* Handle intermediate format (separate arrays) for backward compatibility */}
+              {!selectedJoke.sections && selectedJoke.contexts && selectedJoke.contexts.length > 0 && (
+                selectedJoke.contexts.map((context, index) => (
+                  <div key={context.id || index} className="joke-section-detail">
+                    <h3 className="section-label-detail context-label">
+                      Context #{index + 1}
+                    </h3>
+                    <p className="joke-text-detail context-text">{context.text}</p>
+                  </div>
+                ))
+              )}
+              
+              {!selectedJoke.sections && selectedJoke.punchlines && selectedJoke.punchlines.length > 0 && (
+                selectedJoke.punchlines.map((punchline, index) => (
+                  <div key={punchline.id || index} className="joke-section-detail">
+                    <h3 className="section-label-detail punchline-label">
+                      Punchline #{index + 1}
+                    </h3>
+                    <p className="joke-text-detail punchline-text">{punchline.text}</p>
+                  </div>
+                ))
+              )}
+              
+              {/* Handle old format (strings) for backward compatibility */}
+              {!selectedJoke.sections && !selectedJoke.contexts && selectedJoke.context && (
+                <div className="joke-section-detail">
+                  <h3 className="section-label-detail context-label">Context</h3>
+                  <p className="joke-text-detail context-text">{selectedJoke.context}</p>
+                </div>
+              )}
 
-              <div className="joke-section-detail">
-                <h3 className="section-label-detail punchline-label">Punchline</h3>
-                <p className="joke-text-detail punchline-text">{selectedJoke.punchline}</p>
-              </div>
+              {!selectedJoke.sections && !selectedJoke.punchlines && selectedJoke.punchline && (
+                <div className="joke-section-detail">
+                  <h3 className="section-label-detail punchline-label">Punchline</h3>
+                  <p className="joke-text-detail punchline-text">{selectedJoke.punchline}</p>
+                </div>
+              )}
             </div>
 
             <div className="joke-detail-footer">
