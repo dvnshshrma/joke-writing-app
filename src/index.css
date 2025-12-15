@@ -12,6 +12,10 @@ body {
   -moz-osx-font-smoothing: grayscale;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   min-height: 100vh;
+  /* Prevent horizontal scroll on mobile */
+  overflow-x: hidden;
+  /* Better touch targets on mobile */
+  -webkit-tap-highlight-color: rgba(102, 126, 234, 0.2);
 }
 
 #root {

@@ -342,14 +342,57 @@
 }
 
 @media (max-width: 768px) {
+  .short-set-editor {
+    padding: 1rem;
+  }
+
+  .editor-header h2 {
+    font-size: 1.3rem;
+  }
+
+  .set-header-input {
+    font-size: 1.1rem;
+    padding: 0.6rem 0.75rem;
+  }
+
+  .section-header {
+    flex-direction: column;
+    gap: 1rem;
+    align-items: stretch;
+  }
+
+  .add-joke-btn {
+    width: 100%;
+  }
+
+  .joke-selector {
+    max-height: 300px;
+    padding: 1rem;
+  }
+
   .selected-joke-item {
     flex-direction: column;
+    padding: 1rem;
   }
   
   .joke-order-controls {
     flex-direction: row;
     width: 100%;
     justify-content: center;
+  }
+
+  .joke-preview-card {
+    padding: 0.75rem;
+  }
+
+  .editor-footer {
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+  }
+
+  .save-btn {
+    width: 100%;
+    padding: 0.75rem 1.5rem;
   }
 }
 

@@ -270,3 +270,39 @@
   }
 }
 
+@media (max-width: 768px) {
+  .old-jokes-list {
+    padding: 1rem;
+  }
+
+  .list-header h2 {
+    font-size: 1.5rem;
+  }
+
+  .back-btn {
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+  }
+
+  .joke-tab {
+    padding: 1rem;
+  }
+
+  .joke-tab h3 {
+    font-size: 1rem;
+  }
+
+  .joke-detail {
+    padding: 1rem;
+  }
+
+  .joke-detail-header h2 {
+    font-size: 1.5rem;
+  }
+
+  .joke-text-detail {
+    font-size: 0.95rem;
+    line-height: 1.6;
+  }
+}
+

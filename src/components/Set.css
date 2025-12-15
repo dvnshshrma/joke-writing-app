@@ -109,3 +109,39 @@
   color: white;
 }
 
+@media (max-width: 768px) {
+  .set {
+    padding: 1rem;
+  }
+
+  .page-header h1 {
+    font-size: 1.8rem;
+  }
+
+  .back-button {
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+  }
+
+  .set-content {
+    padding: 1.5rem;
+  }
+
+  .set-options {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+
+  .set-option-btn {
+    padding: 2rem 1.5rem;
+  }
+
+  .set-option-btn .option-icon {
+    font-size: 3rem;
+  }
+
+  .set-option-btn h2 {
+    font-size: 1.5rem;
+  }
+}
+

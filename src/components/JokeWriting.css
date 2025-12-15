@@ -95,3 +95,31 @@
   margin: 0;
 }
 
+@media (max-width: 768px) {
+  .joke-writing {
+    padding: 1rem;
+  }
+
+  .page-header h1 {
+    font-size: 1.8rem;
+  }
+
+  .back-button {
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+  }
+
+  .joke-writing-content {
+    padding: 1.5rem;
+  }
+
+  .joke-options {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .joke-option-btn {
+    padding: 2rem 1.5rem;
+  }
+}
+
