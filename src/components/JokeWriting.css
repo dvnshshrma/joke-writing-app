@@ -50,3 +50,48 @@
   padding: 2rem;
 }
 
+.joke-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+  margin-top: 2rem;
+}
+
+.joke-option-btn {
+  background: white;
+  border: 2px solid #e0e0e0;
+  border-radius: 16px;
+  padding: 2.5rem 2rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+
+.joke-option-btn:hover {
+  transform: translateY(-8px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  border-color: #667eea;
+}
+
+.joke-option-btn:active {
+  transform: translateY(-4px);
+}
+
+.joke-option-btn .option-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.joke-option-btn h2 {
+  font-size: 1.5rem;
+  color: #333;
+  margin-bottom: 0.5rem;
+}
+
+.joke-option-btn p {
+  font-size: 1rem;
+  color: #666;
+  margin: 0;
+}
+
