@@ -89,6 +89,16 @@
   color: white;
 }
 
+.analysis-option:hover {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.analysis-option:hover h2,
+.analysis-option:hover p {
+  color: white;
+}
+
 @media (max-width: 768px) {
   .app-title {
     font-size: 2.5rem;

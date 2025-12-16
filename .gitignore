@@ -23,6 +23,10 @@ dist-ssr
 *.db-journal
 localStorage-export.json
 
+# Uploaded files
+server/uploads/*
+!server/uploads/.gitkeep
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

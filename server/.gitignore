@@ -6,3 +6,4 @@ localStorage-export.json
 *.db-journal
 
 .vercel
+uploads/*

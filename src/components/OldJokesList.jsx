@@ -20,10 +20,10 @@ function OldJokesList({ onBack, onEdit }) {
       setJokes(savedJokes)
     } catch (error) {
       console.error('Error loading jokes:', error)
-      // Fallback to localStorage if API fails
-      const savedJokes = JSON.parse(localStorage.getItem('comedica_jokes') || '[]')
-      setJokes(savedJokes)
-      alert('Warning: Could not connect to server. Using local storage. Your data may not be saved.')
+      // Show helpful error message instead of falling back to empty localStorage
+      const errorMessage = error.message || 'Unknown error'
+      alert(`Unable to connect to server: ${errorMessage}\n\nPlease ensure:\n1. Backend server is running (npm start in server/ folder)\n2. You're on the same WiFi network\n3. Using the correct API URL\n\nYour jokes are saved in the cloud database and will load once connected.`)
+      setJokes([]) // Don't show empty localStorage data
     }
   }
 

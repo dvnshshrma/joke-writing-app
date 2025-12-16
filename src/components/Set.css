@@ -109,6 +109,16 @@
   color: white;
 }
 
+.set-option-btn.saved-sets:hover {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.set-option-btn.saved-sets:hover h2,
+.set-option-btn.saved-sets:hover p {
+  color: white;
+}
+
 @media (max-width: 768px) {
   .set {
     padding: 1rem;

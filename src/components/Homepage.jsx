@@ -28,6 +28,15 @@ function Homepage() {
             <h2>Set</h2>
             <p>Let's work on a set</p>
           </button>
+
+          <button 
+            className="option-card analysis-option"
+            onClick={() => navigate('/analyze')}
+          >
+            <div className="option-icon">📊</div>
+            <h2>Analyse your sets</h2>
+            <p>Upload audio and analyze performance</p>
+          </button>
         </div>
       </div>
     </div>

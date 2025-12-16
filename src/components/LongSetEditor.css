@@ -1,4 +1,4 @@
-.short-set-editor {
+.long-set-editor {
   background: white;
   border-radius: 16px;
   padding: 2rem;
@@ -540,7 +540,7 @@
 }
 
 @media (max-width: 768px) {
-  .short-set-editor {
+  .long-set-editor {
     padding: 1rem;
   }
 

@@ -1,7 +1,11 @@
--- Create sets table for Comedica app
+-- Create sets table for Comedica app (Complete Version)
 -- Run this in Supabase SQL Editor
--- Complete version with all columns including transitions and is_draft
+-- This includes all columns: transitions and is_draft
 
+-- Drop table if exists (optional - remove if you want to keep existing data)
+-- DROP TABLE IF EXISTS sets CASCADE;
+
+-- Create the sets table with all columns
 CREATE TABLE IF NOT EXISTS sets (
   id TEXT PRIMARY KEY,
   header TEXT NOT NULL DEFAULT '',
@@ -14,7 +18,7 @@ CREATE TABLE IF NOT EXISTS sets (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Create index for faster queries
+-- Create indexes for faster queries
 CREATE INDEX IF NOT EXISTS idx_sets_updated_at ON sets(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sets_type ON sets(type);
 CREATE INDEX IF NOT EXISTS idx_sets_is_draft ON sets(is_draft);

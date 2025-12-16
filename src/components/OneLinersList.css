@@ -1,4 +1,4 @@
-.old-jokes-list {
+.one-liners-list {
   background: white;
   border-radius: 16px;
   padding: 2rem;
@@ -15,11 +15,42 @@
   margin-bottom: 2rem;
   padding-bottom: 1rem;
   border-bottom: 2px solid #f0f0f0;
+  flex-wrap: wrap;
 }
 
 .list-header h2 {
   margin: 0;
   color: #333;
+  flex: 1;
+}
+
+.filter-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.filter-btn {
+  background: #f0f0f0;
+  border: 2px solid #e0e0e0;
+  color: #666;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.filter-btn:hover {
+  background: #e0e0e0;
+  border-color: #667eea;
+}
+
+.filter-btn.active {
+  background: #667eea;
+  border-color: #667eea;
+  color: white;
 }
 
 .back-btn {
@@ -38,20 +69,20 @@
   transform: translateX(-4px);
 }
 
-.no-jokes {
+.no-one-liners {
   color: #999;
   font-style: italic;
   margin-left: auto;
 }
 
-.jokes-layout {
+.one-liners-layout {
   display: grid;
-  grid-template-columns: 350px 1fr;
+  grid-template-columns: 400px 1fr;
   gap: 2rem;
   flex: 1;
 }
 
-.jokes-sidebar {
+.one-liners-sidebar {
   display: flex;
   flex-direction: column;
   gap: 1rem;
@@ -62,7 +93,7 @@
   -webkit-overflow-scrolling: touch;
 }
 
-.joke-tab {
+.one-liner-tab {
   background: #f9f9f9;
   border: 2px solid #e0e0e0;
   border-radius: 12px;
@@ -71,30 +102,33 @@
   transition: all 0.3s ease;
 }
 
-.joke-tab:hover {
+.one-liner-tab:hover {
   border-color: #667eea;
   transform: translateX(4px);
   box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
 }
 
-.joke-tab.active {
+.one-liner-tab.active {
   border-color: #667eea;
   background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
   box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
 }
 
-.joke-tab-header {
+.one-liner-tab-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: 0.5rem;
+  gap: 0.5rem;
 }
 
-.joke-tab-header h3 {
+.one-liner-text-preview {
   margin: 0;
-  font-size: 1.1rem;
   color: #333;
+  font-size: 0.95rem;
+  line-height: 1.5;
   flex: 1;
+  font-style: italic;
 }
 
 .delete-btn {
@@ -109,6 +143,7 @@
   line-height: 1;
   transition: all 0.2s ease;
   opacity: 0.7;
+  flex-shrink: 0;
 }
 
 .delete-btn:hover {
@@ -116,11 +151,11 @@
   transform: scale(1.1);
 }
 
-.joke-tab-meta {
+.one-liner-tab-meta {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .status-badge {
@@ -141,19 +176,23 @@
   color: #155724;
 }
 
-.joke-date {
+.one-liner-date {
   font-size: 0.8rem;
   color: #999;
+  margin-left: auto;
 }
 
-.joke-preview {
-  margin: 0;
-  color: #666;
-  font-size: 0.9rem;
-  line-height: 1.4;
+.empty-state {
+  text-align: center;
+  padding: 2rem;
+  color: #999;
+  font-style: italic;
+  background: #f9f9f9;
+  border-radius: 12px;
+  border: 2px dashed #e0e0e0;
 }
 
-.joke-detail {
+.one-liner-detail {
   background: #f9f9f9;
   border-radius: 12px;
   padding: 2rem;
@@ -162,68 +201,47 @@
   gap: 1.5rem;
 }
 
-.joke-detail-header {
+.one-liner-detail-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding-bottom: 1rem;
   border-bottom: 2px solid #e0e0e0;
+  flex-wrap: wrap;
+  gap: 1rem;
 }
 
-.joke-detail-header h2 {
+.one-liner-detail-header h2 {
   margin: 0;
   color: #333;
   font-size: 1.8rem;
 }
 
-.joke-detail-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2rem;
+.one-liner-detail-body {
   flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
 }
 
-.joke-section-detail {
-  background: white;
-  border-radius: 8px;
-  padding: 1.5rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.section-label-detail {
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin: 0 0 1rem 0;
-  padding-bottom: 0.5rem;
-  border-bottom: 2px solid #f0f0f0;
-}
-
-.context-label {
-  color: #0066cc;
-  border-bottom-color: #4facfe;
-}
-
-.punchline-label {
-  color: #cc0066;
-  border-bottom-color: #f5576c;
-}
-
-.joke-text-detail {
+.one-liner-full-text {
   margin: 0;
-  font-size: 1rem;
+  color: #333;
+  font-size: 1.3rem;
   line-height: 1.8;
-  white-space: pre-wrap;
+  text-align: center;
+  font-style: italic;
+  padding: 2rem;
+  background: white;
+  border-radius: 12px;
+  border-left: 4px solid #667eea;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  max-width: 100%;
+  word-wrap: break-word;
 }
 
-.joke-text-detail.context-text {
-  color: #0066cc;
-}
-
-.joke-text-detail.punchline-text {
-  color: #cc0066;
-}
-
-.joke-detail-footer {
+.one-liner-detail-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -250,32 +268,30 @@
   box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
 }
 
-.joke-meta-info {
+.one-liner-meta-info {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
 }
 
-.joke-meta-info p {
+.one-liner-meta-info p {
   margin: 0;
   font-size: 0.85rem;
   color: #999;
 }
 
 @media (max-width: 1024px) {
-  .jokes-layout {
+  .one-liners-layout {
     grid-template-columns: 1fr;
   }
 
-  .jokes-sidebar {
+  .one-liners-sidebar {
     max-height: 400px;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
   }
 }
 
 @media (max-width: 768px) {
-  .old-jokes-list {
+  .one-liners-list {
     padding: 1rem;
     min-height: auto;
   }
@@ -289,46 +305,52 @@
     font-size: 1.5rem;
   }
 
-  .back-btn {
-    padding: 0.5rem 1rem;
-    font-size: 0.9rem;
+  .filter-buttons {
+    width: 100%;
+    justify-content: stretch;
   }
 
-  .jokes-layout {
+  .filter-btn {
+    flex: 1;
+    text-align: center;
+  }
+
+  .one-liners-layout {
     gap: 1rem;
   }
 
-  .jokes-sidebar {
+  .one-liners-sidebar {
     max-height: calc(100vh - 200px);
     min-height: 200px;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    padding-right: 0.5rem;
   }
 
-  .joke-tab {
+  .one-liner-tab {
     padding: 1rem;
-    flex-shrink: 0;
   }
 
-  .joke-tab-header h3 {
-    font-size: 1rem;
-  }
-
-  .joke-detail {
+  .one-liner-detail {
     padding: 1rem;
     max-height: calc(100vh - 200px);
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
   }
 
-  .joke-detail-header h2 {
+  .one-liner-detail-header h2 {
     font-size: 1.5rem;
   }
 
-  .joke-text-detail {
-    font-size: 0.95rem;
-    line-height: 1.6;
+  .one-liner-full-text {
+    font-size: 1.1rem;
+    padding: 1.5rem;
+  }
+
+  .one-liner-detail-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .edit-btn {
+    width: 100%;
   }
 }
 

@@ -1,4 +1,25 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+// Auto-detect API URL based on environment
+// For local dev: use IP address when accessing from phone, localhost when on computer
+// For production: use VITE_API_URL env variable (set in Vercel)
+const getApiBaseUrl = () => {
+  // If VITE_API_URL is set (production or explicit config), use it
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+  
+  // For local development, detect if we're on a mobile device or different origin
+  // If accessing from phone, use the computer's IP (should be set in .env)
+  // Otherwise, use localhost
+  const hostname = window.location.hostname;
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    return 'http://localhost:3001/api';
+  }
+  
+  // If accessing via IP address, use that IP for API
+  return `http://${hostname}:3001/api`;
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 export const setsAPI = {
   // Get all sets
@@ -44,7 +65,12 @@ export const setsAPI = {
       });
       
       if (!response.ok) {
-        throw new Error('Failed to create set');
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.error || errorData.details || `Failed to create set (${response.status})`;
+        const error = new Error(errorMessage);
+        error.code = errorData.code;
+        error.details = errorData.details;
+        throw error;
       }
       
       return await response.json();

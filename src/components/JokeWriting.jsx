@@ -2,12 +2,15 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import NewJokeEditor from './NewJokeEditor'
 import OldJokesList from './OldJokesList'
+import OneLinersEditor from './OneLinersEditor'
+import OneLinersList from './OneLinersList'
 import './JokeWriting.css'
 
 function JokeWriting() {
   const navigate = useNavigate()
-  const [activeView, setActiveView] = useState('options') // 'options', 'new', 'old', 'edit'
+  const [activeView, setActiveView] = useState('options') // 'options', 'new', 'old', 'edit', 'oneliners', 'oneliners-list'
   const [editingJoke, setEditingJoke] = useState(null)
+  const [editingOneLiner, setEditingOneLiner] = useState(null)
 
   const handleViewChange = (view) => {
     setActiveView(view)
@@ -50,6 +53,18 @@ function JokeWriting() {
               <h2>Work on an old joke</h2>
               <p>Continue working on saved jokes</p>
             </button>
+
+            <button 
+              className="joke-option-btn"
+              onClick={() => {
+                setEditingOneLiner(null)
+                handleViewChange('oneliners')
+              }}
+            >
+              <div className="option-icon">💬</div>
+              <h2>One Liners</h2>
+              <p>Quick one-liner jokes</p>
+            </button>
           </div>
         )}
 
@@ -71,6 +86,35 @@ function JokeWriting() {
           <OldJokesList 
             onBack={() => handleViewChange('options')}
             onEdit={handleEditJoke}
+          />
+        )}
+
+        {(activeView === 'oneliners' || activeView === 'oneliners-edit') && (
+          <OneLinersEditor 
+            oneLiner={editingOneLiner}
+            onBack={() => {
+              setEditingOneLiner(null)
+              if (activeView === 'oneliners-edit') {
+                handleViewChange('oneliners-list')
+              } else {
+                handleViewChange('options')
+              }
+            }}
+            onSave={() => {
+              setEditingOneLiner(null)
+              handleViewChange('oneliners-list')
+            }}
+            onViewSaved={() => handleViewChange('oneliners-list')}
+          />
+        )}
+
+        {activeView === 'oneliners-list' && (
+          <OneLinersList 
+            onBack={() => handleViewChange('options')}
+            onEdit={(oneLiner) => {
+              setEditingOneLiner(oneLiner)
+              handleViewChange('oneliners-edit')
+            }}
           />
         )}
       </div>
