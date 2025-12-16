@@ -1,7 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
+import fs from 'fs';
 import { supabase, setupDatabase } from './database-supabase.js';
+import { analyzeAudio } from './audioAnalyzer.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -392,90 +394,7 @@ app.delete('/api/sets/:id', async (req, res) => {
 
 // ========== ANALYSIS API ==========
 
-// Mock audio analysis function
-// TODO: Replace with real AI audio analysis (e.g., AssemblyAI, Deepgram, or custom ML model)
-async function analyzeAudio(audioFilePath, setData, audioDurationSeconds = null, excludeStartSeconds = 0, excludeEndSeconds = 0) {
-  // Simulate analysis delay
-  await new Promise(resolve => setTimeout(resolve, 2000));
-  
-  // Handle both camelCase (from API) and snake_case (from database) formats
-  const jokeDetails = setData.joke_details || setData.jokeDetails || [];
-  const jokes = setData.jokes || [];
-  const numJokes = jokeDetails.length || jokes.length || 5;
-  // Use actual audio duration if provided, otherwise default to 300 seconds (5 minutes)
-  const fullDuration = audioDurationSeconds || 300;
-  
-  // Calculate effective duration after excluding start and end
-  const effectiveDuration = Math.max(0, fullDuration - excludeStartSeconds - excludeEndSeconds);
-  const analysisStartTime = excludeStartSeconds;
-  const analysisEndTime = fullDuration - excludeEndSeconds;
-  
-  // Generate mock timeline data (laughs over time) - only for the analyzed portion
-  const timeline = [];
-  for (let i = analysisStartTime; i <= analysisEndTime; i += 10) {
-    const laughs = Math.floor(Math.random() * 5); // 0-4 laughs per 10 seconds
-    timeline.push({ time: i, laughs });
-  }
-  
-  // Adjust timeline times to be relative to the start of analysis (for display)
-  const adjustedTimeline = timeline.map(point => ({
-    time: point.time - analysisStartTime,
-    laughs: point.laughs
-  }));
-  
-  // Generate mock joke metrics with headers
-  const jokeMetrics = [];
-  let totalLaughs = 0;
-  for (let i = 0; i < numJokes; i++) {
-    const laughs = Math.floor(Math.random() * 15) + 2; // 2-16 laughs per joke
-    totalLaughs += laughs;
-    
-    // Get joke header from jokeDetails array (contains full joke objects with header)
-    let jokeHeader = `Joke ${i + 1}`; // Default fallback
-    if (jokeDetails && jokeDetails[i]) {
-      jokeHeader = jokeDetails[i].header || jokeHeader;
-    } else if (jokes && jokes[i]) {
-      // If jokes array contains objects with headers
-      if (typeof jokes[i] === 'object' && jokes[i].header) {
-        jokeHeader = jokes[i].header;
-      }
-    }
-    
-    jokeMetrics.push({ 
-      jokeIndex: i, 
-      laughs,
-      header: jokeHeader
-    });
-  }
-  
-  const avgLaughsPerJoke = totalLaughs / numJokes;
-  // Calculate laughs per minute based on effective duration (excluding applause)
-  const laughsPerMinute = effectiveDuration > 0 ? (totalLaughs / effectiveDuration) * 60 : 0;
-  
-  // Categorize based on metrics
-  let category = 'average';
-  if (laughsPerMinute >= 8 && avgLaughsPerJoke >= 8) {
-    category = 'good';
-  } else if (laughsPerMinute < 4 || avgLaughsPerJoke < 4) {
-    category = 'bad';
-  }
-  
-  return {
-    laughsPerMinute: parseFloat(laughsPerMinute.toFixed(2)),
-    avgLaughsPerJoke: parseFloat(avgLaughsPerJoke.toFixed(2)),
-    category,
-    timeline: adjustedTimeline, // Use adjusted timeline (relative to analysis start)
-    originalTimeline: timeline, // Keep original timeline with absolute times
-    jokeMetrics,
-    maxLaughs: Math.max(...jokeMetrics.map(m => m.laughs), 1),
-    excludedStart: excludeStartSeconds,
-    excludedEnd: excludeEndSeconds,
-    effectiveDuration: effectiveDuration,
-    fullDuration: fullDuration
-  };
-}
-
-// Analyze audio file
+// Analyze audio file (using imported analyzeAudio from audioAnalyzer.js)
 app.post('/api/analysis/analyze', (req, res, next) => {
   upload.single('audio')(req, res, (err) => {
     if (err) {
@@ -502,8 +421,10 @@ app.post('/api/analysis/analyze', (req, res, next) => {
       return res.status(400).json({ error: 'Set ID is required' });
     }
 
-    // Parse audio duration if provided
+    // Parse audio duration and exclusion parameters
     const audioDurationSeconds = audioDuration ? parseInt(audioDuration, 10) : null;
+    const excludeStartSeconds = req.body.excludeStartSeconds ? parseInt(req.body.excludeStartSeconds, 10) : 0;
+    const excludeEndSeconds = req.body.excludeEndSeconds ? parseInt(req.body.excludeEndSeconds, 10) : 0;
 
     // Get set data
     const { data: setData, error: setError } = await supabase
@@ -524,7 +445,7 @@ app.post('/api/analysis/analyze', (req, res, next) => {
     // Analyze audio (mock for now)
     const analysis = await analyzeAudio(req.file.path, setData, audioDurationSeconds, excludeStartSeconds, excludeEndSeconds);
 
-    // Save analysis to database
+    // Save analysis to database (including advanced analytics)
     const analysisDoc = {
       id: Date.now().toString(),
       set_id: setId,
@@ -535,9 +456,27 @@ app.post('/api/analysis/analyze', (req, res, next) => {
       category: analysis.category,
       timeline: analysis.timeline,
       joke_metrics: analysis.jokeMetrics,
+      // Advanced analytics fields
+      word_count: analysis.wordCount || null,
+      speaking_pace: analysis.speakingPace || null,
+      silence_count: analysis.silenceCount || null,
+      positive_moments: analysis.positiveMoments || null,
+      chapters: analysis.chapters || [],
+      is_mock_data: analysis.isMockData || false,
+      excluded_start: analysis.excludedStart || 0,
+      excluded_end: analysis.excludedEnd || 0,
+      effective_duration: analysis.effectiveDuration || null,
+      full_duration: analysis.fullDuration || null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
+    
+    // Clean up uploaded file after analysis
+    try {
+      fs.unlinkSync(req.file.path);
+    } catch (e) {
+      console.log('Note: Could not delete temp file:', e.message);
+    }
 
     const { error: insertError } = await supabase
       .from('analysis_results')
@@ -589,6 +528,17 @@ app.get('/api/analysis', async (req, res) => {
       category: analysis.category,
       timeline: analysis.timeline || [],
       jokeMetrics: analysis.joke_metrics || [],
+      // Advanced analytics
+      wordCount: analysis.word_count,
+      speakingPace: analysis.speaking_pace,
+      silenceCount: analysis.silence_count,
+      positiveMoments: analysis.positive_moments,
+      chapters: analysis.chapters || [],
+      isMockData: analysis.is_mock_data,
+      excludedStart: analysis.excluded_start,
+      excludedEnd: analysis.excluded_end,
+      effectiveDuration: analysis.effective_duration,
+      fullDuration: analysis.full_duration,
       createdAt: analysis.created_at,
       updatedAt: analysis.updated_at
     }));
@@ -626,6 +576,17 @@ app.get('/api/analysis/:id', async (req, res) => {
       category: data.category,
       timeline: data.timeline || [],
       jokeMetrics: data.joke_metrics || [],
+      // Advanced analytics
+      wordCount: data.word_count,
+      speakingPace: data.speaking_pace,
+      silenceCount: data.silence_count,
+      positiveMoments: data.positive_moments,
+      chapters: data.chapters || [],
+      isMockData: data.is_mock_data,
+      excludedStart: data.excluded_start,
+      excludedEnd: data.excluded_end,
+      effectiveDuration: data.effective_duration,
+      fullDuration: data.full_duration,
       createdAt: data.created_at,
       updatedAt: data.updated_at
     };

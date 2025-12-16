@@ -159,6 +159,12 @@ function Analysis() {
       if (audioDuration) {
         formData.append('audioDuration', audioDuration.toString())
       }
+      if (excludeStart > 0) {
+        formData.append('excludeStartSeconds', excludeStart.toString())
+      }
+      if (excludeEnd > 0) {
+        formData.append('excludeEndSeconds', excludeEnd.toString())
+      }
 
       const result = await analysisAPI.analyze(formData)
       setAnalysisResult(result)
@@ -549,6 +555,78 @@ function Analysis() {
                 })}
               </div>
             </div>
+
+            {/* Advanced Analytics Section */}
+            <div className="advanced-analytics-section">
+              <h3>📊 Advanced Insights</h3>
+              {analysisResult.isMockData && (
+                <div className="mock-data-notice">
+                  ℹ️ Using simulated analysis. Add AssemblyAI API key for real AI analysis.
+                </div>
+              )}
+              <div className="insights-grid">
+                <div className="insight-card">
+                  <span className="insight-icon">🎤</span>
+                  <div className="insight-content">
+                    <h4>Speaking Pace</h4>
+                    <p className="insight-value">{analysisResult.speakingPace || '~150'} WPM</p>
+                    <p className="insight-label">words per minute</p>
+                  </div>
+                </div>
+                <div className="insight-card">
+                  <span className="insight-icon">📝</span>
+                  <div className="insight-content">
+                    <h4>Word Count</h4>
+                    <p className="insight-value">{analysisResult.wordCount || '-'}</p>
+                    <p className="insight-label">total words spoken</p>
+                  </div>
+                </div>
+                <div className="insight-card">
+                  <span className="insight-icon">😂</span>
+                  <div className="insight-content">
+                    <h4>Laugh Moments</h4>
+                    <p className="insight-value">{analysisResult.silenceCount || '-'}</p>
+                    <p className="insight-label">detected pauses for laughs</p>
+                  </div>
+                </div>
+                <div className="insight-card">
+                  <span className="insight-icon">⏱️</span>
+                  <div className="insight-content">
+                    <h4>Set Duration</h4>
+                    <p className="insight-value">
+                      {analysisResult.effectiveDuration ? 
+                        `${Math.floor(analysisResult.effectiveDuration / 60)}:${(analysisResult.effectiveDuration % 60).toString().padStart(2, '0')}` 
+                        : '-'}
+                    </p>
+                    <p className="insight-label">analyzed time</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Performance Tips */}
+              <div className="performance-tips">
+                <h4>💡 Performance Tips</h4>
+                {generatePerformanceTips(analysisResult)}
+              </div>
+
+              {/* Joke Performance Ranking */}
+              <div className="joke-ranking">
+                <h4>🏆 Top Performing Jokes</h4>
+                <div className="ranking-list">
+                  {[...analysisResult.jokeMetrics]
+                    .sort((a, b) => b.laughs - a.laughs)
+                    .slice(0, 3)
+                    .map((joke, i) => (
+                      <div key={i} className={`ranking-item rank-${i + 1}`}>
+                        <span className="rank-badge">{i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'}</span>
+                        <span className="rank-joke">{joke.header}</span>
+                        <span className="rank-laughs">{joke.laughs} laughs</span>
+                      </div>
+                    ))
+                  }
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -556,71 +634,323 @@ function Analysis() {
   )
 }
 
-// Simple Timeline Chart Component
+// Generate performance tips based on analysis results
+function generatePerformanceTips(analysis) {
+  const tips = []
+  
+  if (analysis.laughsPerMinute < 4) {
+    tips.push({ icon: '📈', text: 'Try increasing joke density - aim for 4-8 laughs per minute' })
+  } else if (analysis.laughsPerMinute >= 8) {
+    tips.push({ icon: '🔥', text: 'Great pace! You\'re hitting the sweet spot of 8+ laughs per minute' })
+  }
+  
+  if (analysis.jokeMetrics && analysis.jokeMetrics.length > 0) {
+    const sorted = [...analysis.jokeMetrics].sort((a, b) => b.laughs - a.laughs)
+    const weakJokes = analysis.jokeMetrics.filter(j => j.laughs < analysis.avgLaughsPerJoke * 0.5)
+    
+    if (weakJokes.length > 0) {
+      tips.push({ 
+        icon: '🎯', 
+        text: `${weakJokes.length} joke(s) underperformed. Consider reworking or replacing them.` 
+      })
+    }
+    
+    if (sorted[0] && sorted[0].jokeIndex === analysis.jokeMetrics.length - 1) {
+      tips.push({ icon: '🎬', text: 'Strong closer! Your final joke is your best performer.' })
+    } else if (sorted[0] && sorted[0].jokeIndex === 0) {
+      tips.push({ icon: '🚀', text: 'Great opener! Consider if your closer can match it.' })
+    }
+  }
+  
+  if (analysis.speakingPace) {
+    if (analysis.speakingPace > 170) {
+      tips.push({ icon: '🐢', text: 'You might be speaking too fast. Try slowing down for better delivery.' })
+    } else if (analysis.speakingPace < 130) {
+      tips.push({ icon: '⚡', text: 'Your pace is slow. A slightly faster pace can maintain energy.' })
+    }
+  }
+  
+  if (tips.length === 0) {
+    tips.push({ icon: '✨', text: 'Solid performance! Keep refining and experimenting.' })
+  }
+  
+  return (
+    <div className="tips-list">
+      {tips.map((tip, i) => (
+        <div key={i} className="tip-item">
+          <span className="tip-icon">{tip.icon}</span>
+          <span className="tip-text">{tip.text}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// Enhanced Timeline Chart Component with hover, minima/maxima
 function TimelineChart({ data, effectiveDuration }) {
+  const [hoveredPoint, setHoveredPoint] = useState(null)
+  
   if (!data || data.length === 0) {
     return <p>No timeline data available</p>
   }
 
   const maxLaughs = Math.max(...data.map(d => d.laughs), 1)
+  const minLaughs = Math.min(...data.map(d => d.laughs))
   const totalTime = effectiveDuration || (data.length > 0 ? data[data.length - 1].time : 100)
-  const chartWidth = 800
-  const chartHeight = 200
-  const padding = 40
+  const totalLaughs = data.reduce((sum, d) => sum + d.laughs, 0)
+  const avgLaughs = totalLaughs / data.length
+  
+  // Find peaks (local maxima) and valleys (local minima)
+  const peaks = []
+  const valleys = []
+  for (let i = 1; i < data.length - 1; i++) {
+    if (data[i].laughs > data[i-1].laughs && data[i].laughs > data[i+1].laughs && data[i].laughs >= maxLaughs * 0.7) {
+      peaks.push({ ...data[i], index: i })
+    }
+    if (data[i].laughs < data[i-1].laughs && data[i].laughs < data[i+1].laughs && data[i].laughs <= minLaughs + 1) {
+      valleys.push({ ...data[i], index: i })
+    }
+  }
+  
+  // Global max and min
+  const globalMax = data.reduce((max, d) => d.laughs > max.laughs ? d : max, data[0])
+  const globalMin = data.reduce((min, d) => d.laughs < min.laughs ? d : min, data[0])
+  
+  const chartWidth = 900
+  const chartHeight = 280
+  const padding = { top: 40, right: 50, bottom: 50, left: 60 }
 
-  const scaleX = (time) => (time / totalTime) * (chartWidth - padding * 2) + padding
-  const scaleY = (laughs) => chartHeight - padding - (laughs / maxLaughs) * (chartHeight - padding * 2)
+  const scaleX = (time) => (time / totalTime) * (chartWidth - padding.left - padding.right) + padding.left
+  const scaleY = (laughs) => chartHeight - padding.bottom - (laughs / maxLaughs) * (chartHeight - padding.top - padding.bottom)
+  
+  const formatTime = (seconds) => `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`
+
+  // Create smooth path
+  const pathData = data.map((d, i) => {
+    const x = scaleX(d.time)
+    const y = scaleY(d.laughs)
+    return i === 0 ? `M ${x} ${y}` : `L ${x} ${y}`
+  }).join(' ')
+
+  // Create gradient area
+  const areaPath = pathData + ` L ${scaleX(data[data.length-1].time)} ${chartHeight - padding.bottom} L ${padding.left} ${chartHeight - padding.bottom} Z`
 
   return (
-    <div className="timeline-chart">
-      <div className="chart-container">
+    <div className="timeline-chart enhanced">
+      {/* Chart Stats Bar */}
+      <div className="chart-stats-bar">
+        <div className="chart-stat">
+          <span className="stat-label">Peak</span>
+          <span className="stat-value peak">{globalMax.laughs} laughs @ {formatTime(globalMax.time)}</span>
+        </div>
+        <div className="chart-stat">
+          <span className="stat-label">Low</span>
+          <span className="stat-value low">{globalMin.laughs} laughs @ {formatTime(globalMin.time)}</span>
+        </div>
+        <div className="chart-stat">
+          <span className="stat-label">Average</span>
+          <span className="stat-value avg">{avgLaughs.toFixed(1)} laughs/interval</span>
+        </div>
+        <div className="chart-stat">
+          <span className="stat-label">Total</span>
+          <span className="stat-value total">{totalLaughs} laughs</span>
+        </div>
+      </div>
+
+      <div className="chart-container enhanced">
         <svg width="100%" height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="chart-svg" preserveAspectRatio="xMidYMid meet">
-          {/* Grid lines */}
+          <defs>
+            {/* Gradient for area fill */}
+            <linearGradient id="areaGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="#667eea" stopOpacity="0.4" />
+              <stop offset="100%" stopColor="#667eea" stopOpacity="0.05" />
+            </linearGradient>
+            {/* Glow filter for line */}
+            <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+              <feMerge>
+                <feMergeNode in="coloredBlur"/>
+                <feMergeNode in="SourceGraphic"/>
+              </feMerge>
+            </filter>
+            {/* Drop shadow */}
+            <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+              <feDropShadow dx="0" dy="2" stdDeviation="3" floodOpacity="0.2"/>
+            </filter>
+          </defs>
+
+          {/* Background grid */}
           {[0, 1, 2, 3, 4, 5].map(y => {
             const yPos = scaleY((y / 5) * maxLaughs)
+            const value = Math.round((y / 5) * maxLaughs)
             return (
-              <line
-                key={y}
-                x1={padding}
-                y1={yPos}
-                x2={chartWidth - padding}
-                y2={yPos}
-                stroke="#e0e0e0"
-                strokeWidth="1"
-              />
+              <g key={y}>
+                <line
+                  x1={padding.left}
+                  y1={yPos}
+                  x2={chartWidth - padding.right}
+                  y2={yPos}
+                  stroke={y === 0 ? '#ccc' : '#e8e8e8'}
+                  strokeWidth={y === 0 ? 2 : 1}
+                  strokeDasharray={y === 0 ? '0' : '4,4'}
+                />
+                <text x={padding.left - 10} y={yPos + 4} fill="#888" fontSize="11" textAnchor="end" fontWeight="500">
+                  {value}
+                </text>
+              </g>
             )
           })}
-          
+
+          {/* Time markers */}
+          {[0, 0.25, 0.5, 0.75, 1].map((pct, i) => {
+            const time = Math.floor(totalTime * pct)
+            const x = scaleX(time)
+            return (
+              <g key={i}>
+                <line x1={x} y1={chartHeight - padding.bottom} x2={x} y2={chartHeight - padding.bottom + 6} stroke="#888" strokeWidth="1" />
+                <text x={x} y={chartHeight - padding.bottom + 20} fill="#666" fontSize="11" textAnchor="middle" fontWeight="500">
+                  {formatTime(time)}
+                </text>
+              </g>
+            )
+          })}
+
+          {/* Average line */}
+          <line
+            x1={padding.left}
+            y1={scaleY(avgLaughs)}
+            x2={chartWidth - padding.right}
+            y2={scaleY(avgLaughs)}
+            stroke="#ffa726"
+            strokeWidth="2"
+            strokeDasharray="8,4"
+            opacity="0.8"
+          />
+          <text x={chartWidth - padding.right + 5} y={scaleY(avgLaughs) + 4} fill="#ffa726" fontSize="10" fontWeight="600">
+            AVG
+          </text>
+
+          {/* Area fill */}
+          <path d={areaPath} fill="url(#areaGradient)" />
+
+          {/* Main line */}
+          <path
+            d={pathData}
+            fill="none"
+            stroke="url(#lineGradient)"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            filter="url(#glow)"
+            style={{ stroke: '#667eea' }}
+          />
+
+          {/* Line gradient definition */}
+          <defs>
+            <linearGradient id="lineGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#667eea" />
+              <stop offset="50%" stopColor="#764ba2" />
+              <stop offset="100%" stopColor="#667eea" />
+            </linearGradient>
+          </defs>
+
+          {/* Peak markers */}
+          {peaks.slice(0, 3).map((peak, i) => (
+            <g key={`peak-${i}`}>
+              <circle cx={scaleX(peak.time)} cy={scaleY(peak.laughs)} r="8" fill="#4caf50" stroke="white" strokeWidth="2" filter="url(#shadow)" />
+              <text x={scaleX(peak.time)} y={scaleY(peak.laughs) - 14} fill="#4caf50" fontSize="10" textAnchor="middle" fontWeight="700">
+                ▲ {peak.laughs}
+              </text>
+            </g>
+          ))}
+
+          {/* Valley markers */}
+          {valleys.slice(0, 2).map((valley, i) => (
+            <g key={`valley-${i}`}>
+              <circle cx={scaleX(valley.time)} cy={scaleY(valley.laughs)} r="6" fill="#ef5350" stroke="white" strokeWidth="2" />
+              <text x={scaleX(valley.time)} y={scaleY(valley.laughs) + 20} fill="#ef5350" fontSize="9" textAnchor="middle" fontWeight="600">
+                ▼ {valley.laughs}
+              </text>
+            </g>
+          ))}
+
+          {/* Global max marker */}
+          <g>
+            <circle cx={scaleX(globalMax.time)} cy={scaleY(globalMax.laughs)} r="10" fill="#ffd700" stroke="#ff9800" strokeWidth="3" filter="url(#shadow)" />
+            <text x={scaleX(globalMax.time)} y={scaleY(globalMax.laughs) - 18} fill="#ff9800" fontSize="11" textAnchor="middle" fontWeight="700">
+              🔥 MAX
+            </text>
+          </g>
+
+          {/* Interactive hover points */}
+          {data.map((d, i) => (
+            <g key={i}>
+              <circle
+                cx={scaleX(d.time)}
+                cy={scaleY(d.laughs)}
+                r={hoveredPoint === i ? 8 : 4}
+                fill={hoveredPoint === i ? '#764ba2' : '#667eea'}
+                stroke="white"
+                strokeWidth={hoveredPoint === i ? 3 : 1}
+                style={{ cursor: 'pointer', transition: 'all 0.2s ease' }}
+                onMouseEnter={() => setHoveredPoint(i)}
+                onMouseLeave={() => setHoveredPoint(null)}
+              />
+              {hoveredPoint === i && (
+                <g>
+                  <rect
+                    x={scaleX(d.time) - 45}
+                    y={scaleY(d.laughs) - 45}
+                    width="90"
+                    height="35"
+                    rx="6"
+                    fill="rgba(0,0,0,0.85)"
+                    filter="url(#shadow)"
+                  />
+                  <text x={scaleX(d.time)} y={scaleY(d.laughs) - 30} fill="white" fontSize="11" textAnchor="middle" fontWeight="600">
+                    {formatTime(d.time)}
+                  </text>
+                  <text x={scaleX(d.time)} y={scaleY(d.laughs) - 17} fill="#ffd700" fontSize="12" textAnchor="middle" fontWeight="700">
+                    {d.laughs} laughs
+                  </text>
+                </g>
+              )}
+            </g>
+          ))}
+
           {/* Y-axis label */}
-          <text x={20} y={chartHeight / 2} fill="#666" fontSize="12" textAnchor="middle" transform={`rotate(-90, 20, ${chartHeight / 2})`}>
+          <text x={20} y={chartHeight / 2} fill="#666" fontSize="12" fontWeight="600" textAnchor="middle" transform={`rotate(-90, 20, ${chartHeight / 2})`}>
             Laughs
           </text>
-          
-          {/* Data line */}
-          <polyline
-            points={data.map(d => `${scaleX(d.time)},${scaleY(d.laughs)}`).join(' ')}
-            fill="none"
-            stroke="#667eea"
-            strokeWidth="3"
-          />
-          
-          {/* Data points */}
-          {data.filter((d, i) => i % 5 === 0).map((d, i) => (
-            <circle
-              key={i}
-              cx={scaleX(d.time)}
-              cy={scaleY(d.laughs)}
-              r="4"
-              fill="#667eea"
-            />
-          ))}
+
+          {/* X-axis label */}
+          <text x={chartWidth / 2} y={chartHeight - 8} fill="#666" fontSize="12" fontWeight="600" textAnchor="middle">
+            Time
+          </text>
         </svg>
       </div>
-      <div className="chart-labels">
-        <span>0:00</span>
-        <span>{Math.floor(totalTime / 60)}:{(totalTime % 60).toString().padStart(2, '0')}</span>
+
+      {/* Legend */}
+      <div className="chart-legend">
+        <div className="legend-item">
+          <span className="legend-dot" style={{ background: '#667eea' }}></span>
+          <span>Laughs over time</span>
+        </div>
+        <div className="legend-item">
+          <span className="legend-line" style={{ background: '#ffa726' }}></span>
+          <span>Average</span>
+        </div>
+        <div className="legend-item">
+          <span className="legend-dot" style={{ background: '#ffd700', border: '2px solid #ff9800' }}></span>
+          <span>Peak moment</span>
+        </div>
+        <div className="legend-item">
+          <span className="legend-dot" style={{ background: '#4caf50' }}></span>
+          <span>High points</span>
+        </div>
       </div>
-      <p className="chart-note">Timeline shows analyzed portion only (applause excluded)</p>
+
+      <p className="chart-note">💡 Hover over data points for details • Timeline shows analyzed portion (applause excluded)</p>
     </div>
   )
 }

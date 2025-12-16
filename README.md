@@ -27,14 +27,23 @@ A web application for stand-up comedians to organize, edit, and manage versions 
 
 ### ✅ Performance Analysis (Implemented)
 - **Audio Upload**: Upload audio recordings of your performances
-- **AI Analysis**: Analyze audio to detect laughs and generate metrics
+- **Real AI Analysis**: Uses AssemblyAI for accurate speech and laugh detection
+- **Mock Analysis Fallback**: Works without API key using simulated data
 - **Laughs per Minute**: Track overall audience engagement
 - **Laughs per Joke**: See which jokes get the most laughs
 - **Timeline Graph**: Visual timeline showing laughs throughout your set
 - **Category Classification**: Automatically categorizes sets as "Good", "Average", or "Bad"
 - **Exclude Applause**: Remove start and end applause for more accurate metrics
 - **View Old Analyses**: Browse and review all your previous analyses
-- **Tab-Based Interface**: Easy navigation between new analysis and saved analyses 
+- **Tab-Based Interface**: Easy navigation between new analysis and saved analyses
+
+### ✅ Advanced Analytics (Implemented)
+- **Speaking Pace**: Words per minute analysis
+- **Word Count**: Total words spoken in your set
+- **Laugh Moments**: Detected pauses where audience laughed
+- **Performance Tips**: AI-generated suggestions for improvement
+- **Top Performing Jokes**: Ranking of your best jokes
+- **Set Duration Tracking**: Analyzed vs total time metrics 
 
 ## Getting Started
 
@@ -74,7 +83,12 @@ SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_KEY=your_anon_key_here
 DB_NAME=comedica
 PORT=3001
+
+# Optional: For real AI audio analysis (get free key at https://www.assemblyai.com)
+ASSEMBLYAI_API_KEY=your_assemblyai_api_key_here
 ```
+
+> **Note**: Without an AssemblyAI API key, the app uses simulated analysis data. The free tier includes 100 hours of audio analysis.
 
 #### 5. Start the Backend Server
 
@@ -273,11 +287,10 @@ joke-writing-app/
 - Mobile responsive design
 
 ### 🚧 In Progress / Planned
-- Real AI audio analysis (currently using mock data)
-- Advanced analytics and insights
-- Export/import functionality
 - Video analysis support
 - Performance comparison over time
+- Export/import functionality
+- Historical trend analysis
 
 ## API Endpoints
 
