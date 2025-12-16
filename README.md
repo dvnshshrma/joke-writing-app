@@ -1,11 +1,12 @@
 # Comedica
 
-A web application for stand-up comedians to organize, edit, and manage versions of jokes and sets with feedback. Also integrates AI to help with editing jokes.
+A web application for stand-up comedians to organize, edit, and manage versions of jokes and sets with feedback. Analyze your performances and track your progress with detailed metrics.
 
 ## Features
 
 ### ✅ Joke Writing (Implemented)
 - **Write New Jokes**: Create jokes with structured sections (Context and Punchline)
+- **One Liners**: Quick one-liner jokes with dedicated editor
 - **Edit Existing Jokes**: Continue working on saved jokes
 - **Line-by-Line Commenting**: Click on any line to add comments and feedback
 - **Strike-Through & Replacement**: Mark lines for revision and add replacement text
@@ -14,13 +15,26 @@ A web application for stand-up comedians to organize, edit, and manage versions 
 
 ### ✅ Set Management (Implemented)
 - **Short Sets**: Create sets for open mics by selecting and ordering jokes
+- **Long Sets**: Create longer sets for full performances
 - **Set Header**: Define the bigger idea behind your set
-- **Joke Selection**: Choose from all your saved jokes
+- **Joke Selection**: Choose from all your saved jokes (headers only in dropdown)
 - **Sequential Ordering**: Arrange jokes in your performance order
+- **Transitions**: Add transitions between jokes in your set
+- **Draft & Finalize**: Save sets as drafts or finalize them
+- **Text Export**: Download finalized sets as formatted text files
+- **Joke Preview**: Hover/tap on jokes in sets to see full joke content
+- **Saved Sets**: View, edit, and manage all your saved sets
 
-### 🚧 AI Analysis (Coming Soon)
-- Analyze your audio and video performances
-- Track metrics like Laughs Per Joke, Engagement Per Joke, etc. 
+### ✅ Performance Analysis (Implemented)
+- **Audio Upload**: Upload audio recordings of your performances
+- **AI Analysis**: Analyze audio to detect laughs and generate metrics
+- **Laughs per Minute**: Track overall audience engagement
+- **Laughs per Joke**: See which jokes get the most laughs
+- **Timeline Graph**: Visual timeline showing laughs throughout your set
+- **Category Classification**: Automatically categorizes sets as "Good", "Average", or "Bad"
+- **Exclude Applause**: Remove start and end applause for more accurate metrics
+- **View Old Analyses**: Browse and review all your previous analyses
+- **Tab-Based Interface**: Easy navigation between new analysis and saved analyses 
 
 ## Getting Started
 
@@ -144,15 +158,46 @@ The built files will be in the `dist` directory.
 4. Click **"Edit Joke"** to continue editing with all previous comments and revisions intact
 5. Delete jokes using the × button on any joke tab
 
+### One Liners
+
+1. Click **"One Liners"** from the Joke Writing section
+2. Write quick one-liner jokes in a simple text editor
+3. Save as draft or finalize
+4. View all saved one-liners with filtering options (All, Drafts, Final)
+5. Edit or delete existing one-liners
+
+### Performance Analysis
+
+1. Navigate to **"Analyse your sets"** from the homepage
+2. Choose between **"New Analysis"** or **"View Old Analyses"** tabs
+3. For new analysis:
+   - Select a finalized set to analyze
+   - Upload an audio file (MP3, WAV, M4A, OGG)
+   - Optionally exclude start and end applause for more accurate metrics
+   - Click "Analyze Set" to process
+4. View results:
+   - Category (Good/Average/Bad)
+   - Laughs per minute
+   - Average laughs per joke
+   - Timeline graph showing laughs throughout the set
+   - Per-joke metrics with visual bars
+5. View old analyses:
+   - Browse all previous analyses
+   - Click any analysis to see summary
+   - Click "View Full Analysis" to see complete results
+   - Delete analyses you no longer need
+
 ### Data Storage
 
-All jokes and sets are saved in **Supabase** (PostgreSQL cloud database), ensuring your data persists across sessions and devices:
+All jokes, sets, and analyses are saved in **Supabase** (PostgreSQL cloud database), ensuring your data persists across sessions and devices:
 - Joke content (header, sections with contexts and punchlines)
+- One-liners
 - Draft/final status
 - Comments per line
 - Strike-through markings
 - Replacement texts
-- Sets with selected jokes
+- Sets with selected jokes, transitions, and ordering
+- Analysis results with metrics, timelines, and categories
 - Timestamps (created and updated)
 
 See `SETUP.md` for database setup instructions.
@@ -167,11 +212,28 @@ joke-writing-app/
 │   │   ├── JokeWriting.jsx      # Joke writing section with routing
 │   │   ├── NewJokeEditor.jsx    # Editor for creating/editing jokes
 │   │   ├── OldJokesList.jsx     # List and detail view of saved jokes
-│   │   └── Set.jsx              # Set management section (coming soon)
+│   │   ├── OneLinersEditor.jsx  # Editor for one-liner jokes
+│   │   ├── OneLinersList.jsx    # List and view of saved one-liners
+│   │   ├── Set.jsx              # Set management section
+│   │   ├── ShortSetEditor.jsx   # Editor for short sets (open mics)
+│   │   ├── LongSetEditor.jsx    # Editor for long sets
+│   │   ├── SavedSetsList.jsx    # List and management of saved sets
+│   │   └── Analysis.jsx         # Performance analysis section
+│   ├── services/
+│   │   ├── api.js               # API service for jokes
+│   │   ├── setsAPI.js           # API service for sets
+│   │   └── analysisAPI.js       # API service for analyses
 │   ├── App.jsx                  # Main app component with routing
 │   ├── App.css                  # Global app styles
 │   ├── main.jsx                 # Entry point
 │   └── index.css                # Base styles
+├── server/
+│   ├── server-supabase.js       # Express backend server
+│   ├── api/
+│   │   └── index.js             # Vercel serverless function entry
+│   ├── database-supabase.js     # Supabase database connection
+│   ├── create-analysis-table.sql # SQL script for analysis table
+│   └── create-sets-table.sql    # SQL script for sets table
 ├── index.html
 ├── package.json
 └── vite.config.js
@@ -180,24 +242,42 @@ joke-writing-app/
 ## Development Status
 
 ### ✅ Completed
-- Homepage with navigation
-- Joke Writing section with two main options
+- Homepage with navigation (Joke, Set, Analyse your sets)
+- Joke Writing section with three options:
+  - Write new jokes
+  - Work on old jokes
+  - One Liners
 - New joke editor with multiple Context and Punchline sections
 - Line-by-line commenting system
 - Strike-through and replacement functionality
 - Draft and finalize save options
 - Old jokes list and detail view
 - Edit existing jokes functionality
+- One Liners editor and list
 - Short Set editor for open mics
+- Long Set editor for full performances
+- Transitions between jokes
+- Set draft and finalize options
+- Text file export for finalized sets
+- Saved sets list with edit/delete functionality
+- Performance Analysis:
+  - Audio upload and analysis
+  - Laughs per minute and per joke metrics
+  - Timeline graph visualization
+  - Category classification (Good/Average/Bad)
+  - Exclude applause feature
+  - View old analyses
+  - Tab-based interface
 - Cloud database persistence (Supabase)
 - RESTful API backend
+- Mobile responsive design
 
 ### 🚧 In Progress / Planned
-- Long Set editor
-- AI integration for joke editing assistance
-- Performance analysis tools
+- Real AI audio analysis (currently using mock data)
+- Advanced analytics and insights
 - Export/import functionality
-- Set performance tracking
+- Video analysis support
+- Performance comparison over time
 
 ## API Endpoints
 
@@ -216,4 +296,20 @@ The backend provides REST API endpoints:
 - `POST /api/sets` - Create a new set
 - `PUT /api/sets/:id` - Update an existing set
 - `DELETE /api/sets/:id` - Delete a set
+
+### Analysis
+- `POST /api/analysis/analyze` - Upload audio and analyze a set
+- `GET /api/analysis` - Get all analyses
+- `GET /api/analysis/:id` - Get a specific analysis
+- `DELETE /api/analysis/:id` - Delete an analysis
+
+## Database Tables
+
+The application uses the following Supabase tables:
+
+1. **jokes** - Stores all jokes with sections, comments, and revisions
+2. **sets** - Stores sets with selected jokes, transitions, and metadata
+3. **analysis_results** - Stores performance analysis results with metrics and timelines
+
+See `server/create-analysis-table.sql` and `server/create-sets-table.sql` for table schemas.
 
