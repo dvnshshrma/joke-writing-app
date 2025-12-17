@@ -49,7 +49,8 @@ A web application for stand-up comedians to organize, edit, and manage versions 
 - **Video Upload**: Upload MP4, MOV, WEBM video recordings
 - **Audio Extraction**: Automatically extracts audio from video for analysis
 - **Same Metrics**: All audio analysis features work with video files
-- **Large File Support**: Up to 500MB file uploads
+- **Large File Support**: Up to 1GB file uploads
+- **Auto Conversion**: Videos over 1GB are converted to audio client-side before upload
 
 ### ✅ Performance Trends (Implemented)
 - **Progress Tracking**: See improvement over time (LPM change since first analysis)
@@ -57,7 +58,23 @@ A web application for stand-up comedians to organize, edit, and manage versions 
 - **Category Breakdown**: Visual count of Good/Average/Bad sets
 - **Best/Worst Performance**: Highlight your peak and low points
 - **Performance History**: Complete list of all analyzed sets with metrics
-- **Hover Details**: Interactive tooltips on trend chart for detailed data 
+- **Hover Details**: Interactive tooltips on trend chart for detailed data
+- **Exclude Sets**: Toggle sets on/off from trend analysis with checkboxes
+- **Bulk Actions**: Include All / Exclude All buttons for quick selection
+- **Sorting**: Sort performance history by Date, LPM, Name, or Category (ascending/descending)
+
+### ✅ Interval Comparison (Implemented)
+- **Interval Analysis**: Compare performance across time segments (1, 2, 3, or 5 minute intervals)
+- **Best/Worst Intervals**: Identify which parts of your set work best
+- **Momentum Tracking**: See how audience engagement changes between intervals
+- **Visual Bar Chart**: Color-coded bars showing above/below average performance
+
+### ✅ AI Topic Modeling (Implemented)
+- **Joke Extraction**: Automatically extracts jokes from transcript using silence gaps
+- **Topic Classification**: Matches transcript to your saved joke headers
+- **Smart Headers**: AI-generated headers based on content patterns
+- **Minimum Joke Detection**: Ensures at least 4 jokes for a 7-minute set
+- **Comedy Categories**: Fallback classification into 15+ comedy topic categories
 
 ## Getting Started
 
