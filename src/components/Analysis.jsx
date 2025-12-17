@@ -6,22 +6,23 @@ import './Analysis.css'
 
 function Analysis() {
   const navigate = useNavigate()
-  const [selectedSet, setSelectedSet] = useState(null)
-  const [availableSets, setAvailableSets] = useState([])
+  const [setName, setSetName] = useState('') // Text input for set name
   const [audioFile, setAudioFile] = useState(null)
   const [audioDuration, setAudioDuration] = useState(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisResult, setAnalysisResult] = useState(null)
-  const [showSetSelector, setShowSetSelector] = useState(false)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [excludeStart, setExcludeStart] = useState(0) // seconds to exclude from start
   const [excludeEnd, setExcludeEnd] = useState(0) // seconds to exclude from end
-  const [activeTab, setActiveTab] = useState('new') // 'new' or 'old'
+  const [activeTab, setActiveTab] = useState('new') // 'new', 'old', or 'trends'
   const [savedAnalyses, setSavedAnalyses] = useState([])
   const [selectedAnalysis, setSelectedAnalysis] = useState(null)
+  const [mediaFile, setMediaFile] = useState(null) // Renamed from audioFile to support video
+  const [mediaType, setMediaType] = useState(null) // 'audio' or 'video'
+  const [isConverting, setIsConverting] = useState(false) // For video to audio conversion
+  const [conversionMessage, setConversionMessage] = useState(null)
 
   useEffect(() => {
-    loadSets()
     loadRecentAnalyses()
   }, [])
 
@@ -30,21 +31,6 @@ function Analysis() {
       loadSavedAnalyses()
     }
   }, [activeTab])
-
-  const loadSets = async () => {
-    try {
-      setLoading(true)
-      const sets = await setsAPI.getAll()
-      // Only show finalized sets for analysis
-      const finalizedSets = sets.filter(set => !set.isDraft)
-      setAvailableSets(finalizedSets)
-    } catch (error) {
-      console.error('Error loading sets:', error)
-      alert('Failed to load sets. Please try again.')
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const loadRecentAnalyses = async () => {
     try {
@@ -101,51 +87,180 @@ function Analysis() {
   const handleFileSelect = async (e) => {
     const file = e.target.files[0]
     if (file) {
-      if (file.type.startsWith('audio/')) {
-        setAudioFile(file)
+      const isAudio = file.type.startsWith('audio/')
+      const isVideo = file.type.startsWith('video/')
+      const fileSizeMB = file.size / (1024 * 1024)
+      const MAX_SIZE_MB = 1024 // 1GB
+      
+      if (isAudio || isVideo) {
+        // Check if video is too large and needs conversion
+        if (isVideo && fileSizeMB > MAX_SIZE_MB) {
+          setConversionMessage(`Video is ${fileSizeMB.toFixed(0)}MB (over 1GB limit). Converting to audio...`)
+          setIsConverting(true)
+          
+          try {
+            const audioBlob = await extractAudioFromVideo(file)
+            const audioFile = new File([audioBlob], file.name.replace(/\.[^/.]+$/, '.webm'), { type: 'audio/webm' })
+            
+            setAudioFile(audioFile)
+            setMediaFile(audioFile)
+            setMediaType('audio')
+            setConversionMessage(`✅ Converted to audio (${(audioFile.size / (1024 * 1024)).toFixed(1)}MB)`)
+            
+            const duration = await getMediaDuration(audioFile, false)
+            setAudioDuration(duration)
+          } catch (error) {
+            console.error('Error converting video:', error)
+            setConversionMessage('❌ Conversion failed. Try a smaller file or audio format.')
+            setAudioFile(null)
+          } finally {
+            setIsConverting(false)
+          }
+          return
+        }
         
-        // Get audio duration
+        // Normal file handling (under size limit)
+        setAudioFile(file)
+        setMediaFile(file)
+        setMediaType(isAudio ? 'audio' : 'video')
+        setConversionMessage(null)
+        
         try {
-          const duration = await getAudioDuration(file)
+          const duration = await getMediaDuration(file, isVideo)
           setAudioDuration(duration)
         } catch (error) {
-          console.error('Error getting audio duration:', error)
-          // If we can't get duration, we'll use a default in the backend
+          console.error('Error getting media duration:', error)
           setAudioDuration(null)
         }
       } else {
-        alert('Please select an audio file (mp3, wav, m4a, etc.)')
+        alert('Please select an audio or video file (mp3, wav, m4a, mp4, mov, webm, etc.)')
       }
     }
   }
 
-  const getAudioDuration = (file) => {
+  // Extract audio from video using MediaRecorder
+  const extractAudioFromVideo = async (videoFile) => {
     return new Promise((resolve, reject) => {
-      const audio = new Audio()
+      const video = document.createElement('video')
+      video.src = URL.createObjectURL(videoFile)
+      video.muted = false
+      
+      video.onloadedmetadata = async () => {
+        try {
+          // Create audio context
+          const audioContext = new (window.AudioContext || window.webkitAudioContext)()
+          const source = audioContext.createMediaElementSource(video)
+          const destination = audioContext.createMediaStreamDestination()
+          source.connect(destination)
+          source.connect(audioContext.destination)
+          
+          // Set up MediaRecorder for audio
+          const mediaRecorder = new MediaRecorder(destination.stream, { 
+            mimeType: 'audio/webm;codecs=opus' 
+          })
+          const chunks = []
+          
+          mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) chunks.push(e.data)
+          }
+          
+          mediaRecorder.onstop = () => {
+            URL.revokeObjectURL(video.src)
+            audioContext.close()
+            const blob = new Blob(chunks, { type: 'audio/webm' })
+            resolve(blob)
+          }
+          
+          mediaRecorder.onerror = (e) => {
+            URL.revokeObjectURL(video.src)
+            audioContext.close()
+            reject(e)
+          }
+          
+          // Start recording and play video
+          mediaRecorder.start()
+          video.play()
+          
+          // Stop when video ends
+          video.onended = () => {
+            mediaRecorder.stop()
+          }
+          
+          // Fallback timeout (max 2 hours)
+          setTimeout(() => {
+            if (mediaRecorder.state === 'recording') {
+              mediaRecorder.stop()
+            }
+          }, 2 * 60 * 60 * 1000)
+          
+        } catch (error) {
+          URL.revokeObjectURL(video.src)
+          reject(error)
+        }
+      }
+      
+      video.onerror = () => {
+        URL.revokeObjectURL(video.src)
+        reject(new Error('Failed to load video'))
+      }
+    })
+  }
+
+  const getMediaDuration = (file, isVideo = false) => {
+    return new Promise((resolve, reject) => {
+      const media = isVideo ? document.createElement('video') : new Audio()
       const url = URL.createObjectURL(file)
       
-      audio.addEventListener('loadedmetadata', () => {
+      media.addEventListener('loadedmetadata', () => {
         URL.revokeObjectURL(url)
-        resolve(Math.floor(audio.duration))
+        resolve(Math.floor(media.duration))
       })
       
-      audio.addEventListener('error', (e) => {
+      media.addEventListener('error', (e) => {
         URL.revokeObjectURL(url)
         reject(e)
       })
       
-      audio.src = url
+      media.src = url
+      if (isVideo) media.load()
     })
   }
 
+  // Get trend data for performance comparison
+  const getTrendData = () => {
+    if (!savedAnalyses || savedAnalyses.length < 2) return null
+    
+    const sortedAnalyses = [...savedAnalyses].sort((a, b) => 
+      new Date(a.createdAt) - new Date(b.createdAt)
+    )
+    
+    return {
+      analyses: sortedAnalyses,
+      lpmTrend: sortedAnalyses.map(a => ({ date: a.createdAt, value: a.laughsPerMinute, name: a.setName })),
+      avgLaughsTrend: sortedAnalyses.map(a => ({ date: a.createdAt, value: a.avgLaughsPerJoke, name: a.setName })),
+      categories: sortedAnalyses.reduce((acc, a) => {
+        acc[a.category] = (acc[a.category] || 0) + 1
+        return acc
+      }, {}),
+      improvement: sortedAnalyses.length >= 2 ? {
+        lpm: sortedAnalyses[sortedAnalyses.length - 1].laughsPerMinute - sortedAnalyses[0].laughsPerMinute,
+        avg: sortedAnalyses[sortedAnalyses.length - 1].avgLaughsPerJoke - sortedAnalyses[0].avgLaughsPerJoke
+      } : null,
+      bestPerformance: sortedAnalyses.reduce((best, a) => 
+        a.laughsPerMinute > best.laughsPerMinute ? a : best, sortedAnalyses[0]),
+      worstPerformance: sortedAnalyses.reduce((worst, a) => 
+        a.laughsPerMinute < worst.laughsPerMinute ? a : worst, sortedAnalyses[0])
+    }
+  }
+
   const handleAnalyze = async () => {
-    if (!selectedSet) {
-      alert('Please select a set to analyze')
+    if (!setName.trim()) {
+      alert('Please enter a name for this set')
       return
     }
 
     if (!audioFile) {
-      alert('Please upload an audio file')
+      alert('Please upload an audio or video file')
       return
     }
 
@@ -154,8 +269,8 @@ function Analysis() {
     try {
       const formData = new FormData()
       formData.append('audio', audioFile)
-      formData.append('setId', selectedSet.id)
-      formData.append('setName', selectedSet.header)
+      formData.append('setName', setName.trim())
+      formData.append('useTranscript', 'true') // Flag to use transcript-based analysis
       if (audioDuration) {
         formData.append('audioDuration', audioDuration.toString())
       }
@@ -169,15 +284,14 @@ function Analysis() {
       const result = await analysisAPI.analyze(formData)
       setAnalysisResult(result)
       setActiveTab('new') // Stay on new tab to show results
-      alert('✅ Analysis complete!')
+      alert('✅ Analysis complete! Jokes extracted from transcript.')
     } catch (error) {
       console.error('Error analyzing audio:', error)
       const errorMessage = error.message || 'Unknown error'
-      // Show more helpful error messages
       if (errorMessage.includes('table not found') || errorMessage.includes('relation')) {
         alert(`❌ Database Error: ${errorMessage}\n\nPlease run the SQL script:\nserver/create-analysis-table.sql\nin your Supabase SQL Editor.`)
       } else {
-        alert(`❌ Failed to analyze audio: ${errorMessage}`)
+        alert(`❌ Failed to analyze: ${errorMessage}`)
       }
     } finally {
       setIsAnalyzing(false)
@@ -213,9 +327,15 @@ function Analysis() {
           </button>
           <button 
             className={`tab-btn ${activeTab === 'old' ? 'active' : ''}`}
-            onClick={() => setActiveTab('old')}
+            onClick={() => { setActiveTab('old'); loadSavedAnalyses(); }}
           >
             📊 View Old Analyses
+          </button>
+          <button 
+            className={`tab-btn ${activeTab === 'trends' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('trends'); loadSavedAnalyses(); }}
+          >
+            📈 Performance Trends
           </button>
         </div>
       )}
@@ -304,71 +424,41 @@ function Analysis() {
               </div>
             )}
           </div>
+        ) : activeTab === 'trends' && !analysisResult ? (
+          <PerformanceTrends trendData={getTrendData()} formatDate={formatDate} />
         ) : !analysisResult ? (
           <div className="analysis-upload-section">
-            <div className="set-selection-section">
-              <h2>1. Select a Set</h2>
-              <button 
-                className="select-set-btn"
-                onClick={() => setShowSetSelector(!showSetSelector)}
-              >
-                {selectedSet ? selectedSet.header : 'Select a Set'}
-              </button>
-
-              {showSetSelector && (
-                <div className="set-selector">
-                  <div className="selector-header">
-                    <h4>Select a Set to Analyze</h4>
-                    <button 
-                      className="close-selector"
-                      onClick={() => setShowSetSelector(false)}
-                    >
-                      ×
-                    </button>
-                  </div>
-                  {loading ? (
-                    <p>Loading sets...</p>
-                  ) : availableSets.length === 0 ? (
-                    <p>No finalized sets available. Finalize a set first!</p>
-                  ) : (
-                    <div className="sets-list">
-                      {availableSets.map(set => (
-                        <div
-                          key={set.id}
-                          className={`set-option-item ${selectedSet?.id === set.id ? 'selected' : ''}`}
-                          onClick={() => {
-                            setSelectedSet(set)
-                            setShowSetSelector(false)
-                          }}
-                        >
-                          <h4>{set.header || 'Untitled Set'}</h4>
-                          <p>{set.type === 'short' ? '🎤 Short Set' : '🎭 Long Set'} • {set.jokes?.length || 0} jokes</p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
+            <div className="set-name-section">
+              <h2>1. Name Your Set</h2>
+              <p className="section-hint">Enter a name for this performance. The AI will transcribe and automatically detect jokes.</p>
+              <input
+                type="text"
+                className="set-name-input"
+                placeholder="e.g., Open Mic at Comedy Club - Dec 2024"
+                value={setName}
+                onChange={(e) => setSetName(e.target.value)}
+              />
             </div>
 
             <div className="audio-upload-section">
-              <h2>2. Upload Audio</h2>
+              <h2>2. Upload Audio or Video</h2>
               <div className="upload-area">
                 <input
                   type="file"
                   id="audio-upload"
-                  accept="audio/*"
+                  accept="audio/*,video/*"
                   onChange={handleFileSelect}
                   style={{ display: 'none' }}
                 />
                 <label htmlFor="audio-upload" className="upload-label">
                   {audioFile ? (
                     <div className="file-selected">
-                      <span className="file-icon">🎵</span>
+                      <span className="file-icon">{mediaType === 'video' ? '🎬' : '🎵'}</span>
                       <div className="file-info">
                         <p className="file-name">{audioFile.name}</p>
                         <p className="file-size">
                           {(audioFile.size / 1024 / 1024).toFixed(2)} MB
+                          {mediaType && <span className="file-type-badge">{mediaType.toUpperCase()}</span>}
                           {audioDuration && (
                             <span className="file-duration">
                               {' • '}
@@ -382,6 +472,8 @@ function Analysis() {
                         onClick={(e) => {
                           e.stopPropagation()
                           setAudioFile(null)
+                          setMediaFile(null)
+                          setMediaType(null)
                           setAudioDuration(null)
                           setExcludeStart(0)
                           setExcludeEnd(0)
@@ -394,11 +486,25 @@ function Analysis() {
                   ) : (
                     <div className="upload-placeholder">
                       <span className="upload-icon">📁</span>
-                      <p>Click to upload audio file</p>
-                      <p className="upload-hint">Supports: MP3, WAV, M4A, OGG</p>
+                      <p>Click to upload audio or video file</p>
+                      <p className="upload-hint">Audio: MP3, WAV, M4A, OGG • Video: MP4, MOV, WEBM</p>
+                      <p className="upload-hint">Max 1GB • Videos over 1GB will be converted to audio</p>
                     </div>
                   )}
                 </label>
+                
+                {/* Conversion status message */}
+                {isConverting && (
+                  <div className="conversion-status converting">
+                    <span className="spinner">🔄</span>
+                    <p>{conversionMessage || 'Converting video to audio...'}</p>
+                  </div>
+                )}
+                {conversionMessage && !isConverting && (
+                  <div className={`conversion-status ${conversionMessage.includes('✅') ? 'success' : conversionMessage.includes('❌') ? 'error' : 'info'}`}>
+                    <p>{conversionMessage}</p>
+                  </div>
+                )}
               </div>
 
               {audioFile && audioDuration && (
@@ -453,12 +559,12 @@ function Analysis() {
               <button
                 className="analyze-btn"
                 onClick={handleAnalyze}
-                disabled={!selectedSet || !audioFile || isAnalyzing}
+                disabled={!setName.trim() || !audioFile || isAnalyzing}
               >
-                {isAnalyzing ? '🔄 Analyzing...' : '🚀 Analyze Set'}
+                {isAnalyzing ? '🔄 Analyzing & Transcribing...' : '🚀 Analyze Set'}
               </button>
               {isAnalyzing && (
-                <p className="analyzing-hint">Processing audio and detecting laughs...</p>
+                <p className="analyzing-hint">Transcribing audio, detecting laughs, and extracting jokes...</p>
               )}
               {audioFile && audioDuration && (excludeStart > 0 || excludeEnd > 0) && (
                 <p className="exclude-notice">
@@ -473,7 +579,7 @@ function Analysis() {
               <button className="back-btn" onClick={() => {
                 setAnalysisResult(null)
                 setAudioFile(null)
-                setSelectedSet(null)
+                setSetName('')
                 setExcludeStart(0)
                 setExcludeEnd(0)
                 setActiveTab('new')
@@ -531,6 +637,12 @@ function Analysis() {
                 />
               </div>
             </div>
+
+            {/* Interval Comparison Section */}
+            <IntervalComparison 
+              timeline={analysisResult.timeline} 
+              effectiveDuration={analysisResult.effectiveDuration || analysisResult.timeline[analysisResult.timeline.length - 1]?.time}
+            />
 
             <div className="joke-metrics-section">
               <h3>Laughs per Joke</h3>
@@ -626,6 +738,50 @@ function Analysis() {
                   }
                 </div>
               </div>
+
+              {/* Extracted Jokes from Transcript */}
+              {analysisResult.extractedJokes && analysisResult.extractedJokes.length > 0 && (
+                <div className="extracted-jokes-section">
+                  <h4>🎭 Extracted Jokes from Transcript</h4>
+                  <p className="section-description">
+                    AI detected {analysisResult.extractedJokes.length} distinct bits/jokes in your set
+                  </p>
+                  <div className="extracted-jokes-list">
+                    {analysisResult.extractedJokes.map((joke, i) => (
+                      <div key={i} className="extracted-joke-card">
+                        <div className="extracted-joke-header">
+                          <span className="joke-index">#{i + 1}</span>
+                          <h5>{joke.header}</h5>
+                          {joke.duration && (
+                            <span className="joke-duration">
+                              {Math.floor(joke.duration / 60)}:{Math.floor(joke.duration % 60).toString().padStart(2, '0')}
+                            </span>
+                          )}
+                        </div>
+                        {joke.topic && (
+                          <span className="joke-topic-badge">{joke.topic}</span>
+                        )}
+                        {joke.text && (
+                          <p className="joke-text">{joke.text.substring(0, 200)}{joke.text.length > 200 ? '...' : ''}</p>
+                        )}
+                        {joke.laughGap && (
+                          <span className="laugh-indicator">😂 {joke.laughGap.toFixed(1)}s laugh</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Full Transcript */}
+              {analysisResult.transcriptText && (
+                <div className="transcript-section">
+                  <h4>📝 Full Transcript</h4>
+                  <div className="transcript-box">
+                    <p>{analysisResult.transcriptText}</p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -951,6 +1107,445 @@ function TimelineChart({ data, effectiveDuration }) {
       </div>
 
       <p className="chart-note">💡 Hover over data points for details • Timeline shows analyzed portion (applause excluded)</p>
+    </div>
+  )
+}
+
+// Performance Trends Component
+function PerformanceTrends({ trendData, formatDate }) {
+  const [hoveredPoint, setHoveredPoint] = useState(null)
+  const [excludedIds, setExcludedIds] = useState(new Set())
+  const [sortBy, setSortBy] = useState('date') // 'date', 'lpm', 'name', 'category'
+  const [sortOrder, setSortOrder] = useState('desc') // 'asc', 'desc'
+  
+  if (!trendData || !trendData.analyses || trendData.analyses.length < 2) {
+    return (
+      <div className="trends-section">
+        <div className="trends-empty">
+          <span className="trends-empty-icon">📈</span>
+          <h3>Not enough data for trends</h3>
+          <p>Complete at least 2 analyses to see your performance trends over time.</p>
+        </div>
+      </div>
+    )
+  }
+
+  const allAnalyses = trendData.analyses
+  
+  // Filter out excluded analyses
+  const analyses = allAnalyses.filter(a => !excludedIds.has(a.id))
+  const hasData = analyses.length >= 2
+  
+  const toggleExclude = (id) => {
+    setExcludedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
+  
+  // Recalculate trends based on filtered data
+  const lpmTrend = analyses.map(a => ({
+    date: a.createdAt,
+    value: a.laughsPerMinute,
+    name: a.setName
+  }))
+  
+  const bestPerformance = analyses.reduce((best, a) => 
+    a.laughsPerMinute > best.laughsPerMinute ? a : best, analyses[0])
+  const worstPerformance = analyses.reduce((worst, a) => 
+    a.laughsPerMinute < worst.laughsPerMinute ? a : worst, analyses[0])
+  
+  const categories = analyses.reduce((acc, a) => {
+    acc[a.category] = (acc[a.category] || 0) + 1
+    return acc
+  }, {})
+  
+  const improvement = analyses.length >= 2 ? {
+    lpm: analyses[analyses.length - 1].laughsPerMinute - analyses[0].laughsPerMinute
+  } : null
+  
+  // Calculate stats (handle empty state)
+  const avgLPM = analyses.length > 0 ? analyses.reduce((sum, a) => sum + a.laughsPerMinute, 0) / analyses.length : 0
+  const avgLPJ = analyses.length > 0 ? analyses.reduce((sum, a) => sum + a.avgLaughsPerJoke, 0) / analyses.length : 0
+  const totalSets = analyses.length
+  
+  // Chart dimensions
+  const chartWidth = 800
+  const chartHeight = 250
+  const padding = { top: 30, right: 40, bottom: 60, left: 50 }
+  
+  const maxLPM = hasData ? Math.max(...lpmTrend.map(d => d.value), 1) : 10
+  const minLPM = hasData ? Math.min(...lpmTrend.map(d => d.value)) : 0
+  
+  const scaleX = (i) => hasData && lpmTrend.length > 1 
+    ? padding.left + (i / (lpmTrend.length - 1)) * (chartWidth - padding.left - padding.right)
+    : padding.left
+  const scaleY = (val) => chartHeight - padding.bottom - ((val - minLPM * 0.8) / (maxLPM * 1.2 - minLPM * 0.8)) * (chartHeight - padding.top - padding.bottom)
+
+  const pathData = hasData ? lpmTrend.map((d, i) => {
+    const x = scaleX(i)
+    const y = scaleY(d.value)
+    return i === 0 ? `M ${x} ${y}` : `L ${x} ${y}`
+  }).join(' ') : ''
+
+  const formatShortDate = (dateStr) => {
+    const d = new Date(dateStr)
+    return `${d.getMonth() + 1}/${d.getDate()}`
+  }
+
+  return (
+    <div className="trends-section">
+      <h2>📈 Your Performance Over Time</h2>
+      
+      {/* Summary Cards */}
+      <div className="trends-summary">
+        <div className="trend-card highlight">
+          <span className="trend-icon">{!hasData ? '📊' : (improvement && improvement.lpm >= 0 ? '📈' : '📉')}</span>
+          <div className="trend-content">
+            <h4>Overall Progress</h4>
+            <p className={`trend-value ${!hasData ? '' : (improvement && improvement.lpm >= 0 ? 'positive' : 'negative')}`}>
+              {hasData && improvement ? (improvement.lpm >= 0 ? '+' : '') + improvement.lpm.toFixed(1) : '--'} LPM
+            </p>
+            <span className="trend-label">{hasData ? 'since first analysis' : 'select sets to compare'}</span>
+          </div>
+        </div>
+        
+        <div className="trend-card">
+          <span className="trend-icon">🎯</span>
+          <div className="trend-content">
+            <h4>Average LPM</h4>
+            <p className="trend-value">{hasData ? avgLPM.toFixed(1) : '--'}</p>
+            <span className="trend-label">across {totalSets} sets</span>
+          </div>
+        </div>
+        
+        <div className="trend-card">
+          <span className="trend-icon">🏆</span>
+          <div className="trend-content">
+            <h4>Best Performance</h4>
+            <p className="trend-value">{hasData ? bestPerformance.laughsPerMinute.toFixed(1) : '--'} LPM</p>
+            <span className="trend-label">{hasData ? (bestPerformance.setName || 'Untitled') : '--'}</span>
+          </div>
+        </div>
+        
+        <div className="trend-card">
+          <span className="trend-icon">📊</span>
+          <div className="trend-content">
+            <h4>Category Breakdown</h4>
+            <div className="category-breakdown">
+              <span className="cat-pill good">{categories.good || 0} Good</span>
+              <span className="cat-pill average">{categories.average || 0} Avg</span>
+              <span className="cat-pill bad">{categories.bad || 0} Bad</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Trend Chart */}
+      <div className="trend-chart-container">
+        <h3>Laughs Per Minute Trend</h3>
+        <div className="trend-chart">
+          <svg width="100%" height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <linearGradient id="trendGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stopColor="#667eea" stopOpacity="0.3" />
+                <stop offset="100%" stopColor="#667eea" stopOpacity="0.05" />
+              </linearGradient>
+            </defs>
+
+            {/* Grid lines */}
+            {[0, 1, 2, 3, 4].map(i => {
+              const val = minLPM * 0.8 + ((maxLPM * 1.2 - minLPM * 0.8) * i / 4)
+              const y = scaleY(val)
+              return (
+                <g key={i}>
+                  <line x1={padding.left} y1={y} x2={chartWidth - padding.right} y2={y} stroke="#e8e8e8" strokeDasharray="4,4" />
+                  <text x={padding.left - 8} y={y + 4} fill="#888" fontSize="10" textAnchor="end">{val.toFixed(1)}</text>
+                </g>
+              )
+            })}
+
+            {/* Area under curve */}
+            {hasData && (
+              <path 
+                d={pathData + ` L ${scaleX(lpmTrend.length - 1)} ${chartHeight - padding.bottom} L ${padding.left} ${chartHeight - padding.bottom} Z`}
+                fill="url(#trendGradient)"
+              />
+            )}
+
+            {/* Main line */}
+            {hasData && <path d={pathData} fill="none" stroke="#667eea" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
+            
+            {/* Empty state message */}
+            {!hasData && (
+              <text x={chartWidth / 2} y={chartHeight / 2} fill="#999" fontSize="14" textAnchor="middle">
+                Select at least 2 sets to see trend chart
+              </text>
+            )}
+
+            {/* Data points with labels */}
+            {hasData && lpmTrend.map((d, i) => (
+              <g key={i}>
+                <circle
+                  cx={scaleX(i)}
+                  cy={scaleY(d.value)}
+                  r={hoveredPoint === i ? 10 : 6}
+                  fill={hoveredPoint === i ? '#764ba2' : '#667eea'}
+                  stroke="white"
+                  strokeWidth="2"
+                  style={{ cursor: 'pointer', transition: 'all 0.2s ease' }}
+                  onMouseEnter={() => setHoveredPoint(i)}
+                  onMouseLeave={() => setHoveredPoint(null)}
+                />
+                {/* X-axis labels */}
+                <text x={scaleX(i)} y={chartHeight - padding.bottom + 20} fill="#666" fontSize="10" textAnchor="middle">
+                  {formatShortDate(d.date)}
+                </text>
+                {/* Hover tooltip */}
+                {hoveredPoint === i && (
+                  <g>
+                    <rect x={scaleX(i) - 60} y={scaleY(d.value) - 55} width="120" height="45" rx="6" fill="rgba(0,0,0,0.9)" />
+                    <text x={scaleX(i)} y={scaleY(d.value) - 38} fill="white" fontSize="10" textAnchor="middle">{d.name || 'Set'}</text>
+                    <text x={scaleX(i)} y={scaleY(d.value) - 22} fill="#ffd700" fontSize="14" textAnchor="middle" fontWeight="700">{d.value.toFixed(1)} LPM</text>
+                  </g>
+                )}
+              </g>
+            ))}
+
+            {/* Axis labels */}
+            <text x={chartWidth / 2} y={chartHeight - 10} fill="#666" fontSize="11" textAnchor="middle">Performance Date</text>
+            <text x={15} y={chartHeight / 2} fill="#666" fontSize="11" textAnchor="middle" transform={`rotate(-90, 15, ${chartHeight / 2})`}>LPM</text>
+          </svg>
+        </div>
+        <p className="trend-note">💡 Hover over points for details • Each point represents one analyzed performance</p>
+      </div>
+
+      {/* Performance History */}
+      <div className="performance-history">
+        <div className="history-header">
+          <h3>Performance History</h3>
+          <div className="sort-controls">
+            <label>Sort by:</label>
+            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+              <option value="date">Date</option>
+              <option value="lpm">LPM</option>
+              <option value="name">Name</option>
+              <option value="category">Category</option>
+            </select>
+            <button 
+              className="sort-order-btn" 
+              onClick={() => setSortOrder(o => o === 'asc' ? 'desc' : 'asc')}
+              title={sortOrder === 'asc' ? 'Ascending' : 'Descending'}
+            >
+              {sortOrder === 'asc' ? '↑' : '↓'}
+            </button>
+          </div>
+        </div>
+        <div className="history-actions">
+          <p className="history-hint">Click the checkbox to exclude sets from trend analysis</p>
+          <div className="bulk-actions">
+            <button onClick={() => setExcludedIds(new Set())}>✓ Include All</button>
+            <button onClick={() => setExcludedIds(new Set(allAnalyses.map(a => a.id)))}>✗ Exclude All</button>
+          </div>
+        </div>
+        <div className="history-list">
+          {[...allAnalyses].sort((a, b) => {
+            let cmp = 0
+            if (sortBy === 'date') cmp = new Date(a.createdAt) - new Date(b.createdAt)
+            else if (sortBy === 'lpm') cmp = a.laughsPerMinute - b.laughsPerMinute
+            else if (sortBy === 'name') cmp = (a.setName || '').localeCompare(b.setName || '')
+            else if (sortBy === 'category') cmp = (a.category || '').localeCompare(b.category || '')
+            return sortOrder === 'desc' ? -cmp : cmp
+          }).map((a, i) => {
+            const isExcluded = excludedIds.has(a.id)
+            return (
+              <div key={a.id} className={`history-item ${isExcluded ? 'excluded' : ''}`}>
+                <label className="exclude-checkbox">
+                  <input 
+                    type="checkbox" 
+                    checked={!isExcluded}
+                    onChange={() => toggleExclude(a.id)}
+                  />
+                  <span className="checkmark"></span>
+                </label>
+                <div className="history-rank">{allAnalyses.length - i}</div>
+                <div className="history-info">
+                  <h4>{a.setName || 'Untitled Set'}</h4>
+                  <span className="history-date">{formatDate(a.createdAt)}</span>
+                </div>
+                <div className="history-metrics">
+                  <span className="history-lpm">{a.laughsPerMinute.toFixed(1)} LPM</span>
+                  <span className={`category-badge-small ${a.category}`}>{a.category}</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        {excludedIds.size > 0 && (
+          <p className="excluded-notice">
+            ⚠️ {excludedIds.size} set(s) excluded from analysis
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Interval Comparison Component
+function IntervalComparison({ timeline, effectiveDuration }) {
+  const [intervalSize, setIntervalSize] = useState(60) // Default 1 minute intervals
+  
+  if (!timeline || timeline.length === 0 || !effectiveDuration) {
+    return null
+  }
+  
+  // Calculate intervals
+  const intervals = []
+  const numIntervals = Math.ceil(effectiveDuration / intervalSize)
+  
+  for (let i = 0; i < numIntervals; i++) {
+    const startTime = i * intervalSize
+    const endTime = Math.min((i + 1) * intervalSize, effectiveDuration)
+    
+    // Sum laughs in this interval
+    const intervalLaughs = timeline.filter(t => 
+      t.time >= startTime && t.time < endTime
+    ).reduce((sum, t) => sum + t.laughs, 0)
+    
+    // Calculate LPM for this interval
+    const intervalDuration = (endTime - startTime) / 60 // in minutes
+    const lpm = intervalDuration > 0 ? intervalLaughs / intervalDuration : 0
+    
+    intervals.push({
+      index: i,
+      startTime,
+      endTime,
+      laughs: intervalLaughs,
+      lpm: lpm,
+      label: `${Math.floor(startTime / 60)}:${(startTime % 60).toString().padStart(2, '0')} - ${Math.floor(endTime / 60)}:${(endTime % 60).toString().padStart(2, '0')}`
+    })
+  }
+  
+  // Find best and worst intervals
+  const maxLPM = Math.max(...intervals.map(i => i.lpm), 1)
+  const avgLPM = intervals.reduce((sum, i) => sum + i.lpm, 0) / intervals.length
+  const bestInterval = intervals.reduce((best, i) => i.lpm > best.lpm ? i : best, intervals[0])
+  const worstInterval = intervals.reduce((worst, i) => i.lpm < worst.lpm ? i : worst, intervals[0])
+  
+  // Calculate changes between consecutive intervals
+  const changes = intervals.slice(1).map((interval, i) => ({
+    from: intervals[i],
+    to: interval,
+    change: interval.lpm - intervals[i].lpm,
+    percentChange: intervals[i].lpm > 0 ? ((interval.lpm - intervals[i].lpm) / intervals[i].lpm) * 100 : 0
+  }))
+  
+  const formatTime = (seconds) => `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`
+  
+  return (
+    <div className="interval-comparison-section">
+      <div className="interval-header">
+        <h3>📊 Interval-by-Interval Comparison</h3>
+        <div className="interval-selector">
+          <label>Interval size:</label>
+          <select 
+            value={intervalSize} 
+            onChange={(e) => setIntervalSize(parseInt(e.target.value))}
+            className="interval-select"
+          >
+            <option value={60}>1 minute</option>
+            <option value={120}>2 minutes</option>
+            <option value={180}>3 minutes</option>
+            <option value={300}>5 minutes</option>
+          </select>
+        </div>
+      </div>
+      
+      {/* Summary Stats */}
+      <div className="interval-summary">
+        <div className="interval-stat best">
+          <span className="stat-icon">🔥</span>
+          <div>
+            <h4>Best Interval</h4>
+            <p>{bestInterval.label}</p>
+            <span className="stat-value">{bestInterval.lpm.toFixed(1)} LPM</span>
+          </div>
+        </div>
+        <div className="interval-stat worst">
+          <span className="stat-icon">📉</span>
+          <div>
+            <h4>Needs Work</h4>
+            <p>{worstInterval.label}</p>
+            <span className="stat-value">{worstInterval.lpm.toFixed(1)} LPM</span>
+          </div>
+        </div>
+        <div className="interval-stat avg">
+          <span className="stat-icon">📈</span>
+          <div>
+            <h4>Average</h4>
+            <p>{intervals.length} intervals</p>
+            <span className="stat-value">{avgLPM.toFixed(1)} LPM</span>
+          </div>
+        </div>
+      </div>
+      
+      {/* Interval Bars */}
+      <div className="interval-bars">
+        {intervals.map((interval, i) => {
+          const isBest = interval === bestInterval
+          const isWorst = interval === worstInterval
+          const aboveAvg = interval.lpm >= avgLPM
+          
+          return (
+            <div key={i} className={`interval-bar-item ${isBest ? 'best' : ''} ${isWorst ? 'worst' : ''}`}>
+              <div className="interval-label">
+                <span className="interval-time">{interval.label}</span>
+                {isBest && <span className="interval-badge best">🔥 Best</span>}
+                {isWorst && <span className="interval-badge worst">📉 Low</span>}
+              </div>
+              <div className="interval-bar-container">
+                <div 
+                  className={`interval-bar-fill ${aboveAvg ? 'above-avg' : 'below-avg'}`}
+                  style={{ width: `${(interval.lpm / maxLPM) * 100}%` }}
+                />
+                <span className="interval-lpm">{interval.lpm.toFixed(1)} LPM</span>
+              </div>
+              <div className="interval-laughs">{interval.laughs} laughs</div>
+            </div>
+          )
+        })}
+      </div>
+      
+      {/* Changes Between Intervals */}
+      {changes.length > 0 && (
+        <div className="interval-changes">
+          <h4>Momentum Changes</h4>
+          <div className="changes-list">
+            {changes.map((change, i) => (
+              <div key={i} className={`change-item ${change.change >= 0 ? 'positive' : 'negative'}`}>
+                <span className="change-label">
+                  {formatTime(change.from.startTime)} → {formatTime(change.to.endTime)}
+                </span>
+                <span className="change-value">
+                  {change.change >= 0 ? '↑' : '↓'} {Math.abs(change.change).toFixed(1)} LPM
+                  <span className="change-percent">
+                    ({change.percentChange >= 0 ? '+' : ''}{change.percentChange.toFixed(0)}%)
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      
+      <p className="interval-tip">
+        💡 Use this to identify where your set gains or loses momentum
+      </p>
     </div>
   )
 }

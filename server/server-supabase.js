@@ -8,15 +8,15 @@ import { analyzeAudio } from './audioAnalyzer.js';
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Configure multer for file uploads
+// Configure multer for file uploads (audio and video)
 const upload = multer({ 
   dest: 'uploads/',
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit
+  limits: { fileSize: 1024 * 1024 * 1024 }, // 1GB limit for videos
   fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('audio/')) {
+    if (file.mimetype.startsWith('audio/') || file.mimetype.startsWith('video/')) {
       cb(null, true);
     } else {
-      cb(new Error('Only audio files are allowed'), false);
+      cb(new Error('Only audio and video files are allowed'), false);
     }
   }
 });
@@ -400,10 +400,10 @@ app.post('/api/analysis/analyze', (req, res, next) => {
     if (err) {
       console.error('Multer error:', err);
       if (err.code === 'LIMIT_FILE_SIZE') {
-        return res.status(400).json({ error: 'File too large. Maximum size is 100MB.' });
+        return res.status(400).json({ error: 'File too large. Maximum size is 1GB.' });
       }
-      if (err.message === 'Only audio files are allowed') {
-        return res.status(400).json({ error: 'Only audio files are allowed (MP3, WAV, M4A, OGG, etc.)' });
+      if (err.message === 'Only audio and video files are allowed') {
+        return res.status(400).json({ error: 'Only audio and video files are allowed (MP3, WAV, M4A, MP4, MOV, WEBM, etc.)' });
       }
       return res.status(400).json({ error: 'File upload error', details: err.message });
     }
@@ -412,44 +412,73 @@ app.post('/api/analysis/analyze', (req, res, next) => {
 }, async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ error: 'No audio file uploaded' });
+      return res.status(400).json({ error: 'No audio/video file uploaded' });
     }
 
-    const { setId, setName, audioDuration } = req.body;
+    const { setId, setName, audioDuration, useTranscript } = req.body;
     
-    if (!setId) {
-      return res.status(400).json({ error: 'Set ID is required' });
+    // Set name is required (either from text input or existing set)
+    if (!setName && !setId) {
+      return res.status(400).json({ error: 'Set name is required' });
     }
 
-    // Parse audio duration and exclusion parameters
+    // Parse parameters
     const audioDurationSeconds = audioDuration ? parseInt(audioDuration, 10) : null;
     const excludeStartSeconds = req.body.excludeStartSeconds ? parseInt(req.body.excludeStartSeconds, 10) : 0;
     const excludeEndSeconds = req.body.excludeEndSeconds ? parseInt(req.body.excludeEndSeconds, 10) : 0;
+    const useTranscriptMode = useTranscript === 'true' || useTranscript === true;
 
-    // Get set data
-    const { data: setData, error: setError } = await supabase
-      .from('sets')
-      .select('*')
-      .eq('id', setId)
-      .single();
-
-    if (setError) {
-      console.error('Error fetching set:', setError);
-      return res.status(404).json({ error: 'Set not found', details: setError.message });
+    let setData = null;
+    
+    // If setId provided, try to fetch existing set data
+    if (setId) {
+      const { data, error } = await supabase
+        .from('sets')
+        .select('*')
+        .eq('id', setId)
+        .single();
+      
+      if (!error && data) {
+        setData = data;
+      }
     }
 
-    if (!setData) {
-      return res.status(404).json({ error: 'Set not found' });
+    // Fetch all saved jokes to use their headers as topic references
+    let savedJokeHeaders = [];
+    try {
+      const { data: jokes, error: jokesError } = await supabase
+        .from('jokes')
+        .select('header')
+        .order('updated_at', { ascending: false });
+      
+      if (!jokesError && jokes) {
+        savedJokeHeaders = jokes.map(j => j.header).filter(h => h && h.trim());
+      }
+      console.log(`📋 Loaded ${savedJokeHeaders.length} joke headers for topic matching`);
+    } catch (e) {
+      console.log('⚠️ Could not load joke headers:', e.message);
     }
 
-    // Analyze audio (mock for now)
-    const analysis = await analyzeAudio(req.file.path, setData, audioDurationSeconds, excludeStartSeconds, excludeEndSeconds);
+    // Analyze audio with optional transcript-based joke extraction
+    console.log(`🎬 Analyzing: ${req.file.originalname}`);
+    console.log(`📝 Set name: ${setName || setData?.header || 'Untitled'}`);
+    console.log(`🔍 Transcript mode: ${useTranscriptMode}`);
+    
+    const analysis = await analyzeAudio(
+      req.file.path, 
+      setData, 
+      audioDurationSeconds, 
+      excludeStartSeconds, 
+      excludeEndSeconds,
+      useTranscriptMode,
+      savedJokeHeaders
+    );
 
-    // Save analysis to database (including advanced analytics)
+    // Save analysis to database (including transcript and extracted jokes)
     const analysisDoc = {
       id: Date.now().toString(),
-      set_id: setId,
-      set_name: setName || setData.header || 'Untitled Set',
+      set_id: setId || null,
+      set_name: setName || setData?.header || 'Untitled Set',
       audio_file_name: req.file.originalname,
       laughs_per_minute: analysis.laughsPerMinute,
       avg_laughs_per_joke: analysis.avgLaughsPerJoke,
@@ -467,6 +496,9 @@ app.post('/api/analysis/analyze', (req, res, next) => {
       excluded_end: analysis.excludedEnd || 0,
       effective_duration: analysis.effectiveDuration || null,
       full_duration: analysis.fullDuration || null,
+      // New: transcript and extracted jokes
+      transcript_text: analysis.transcriptText || null,
+      extracted_jokes: analysis.extractedJokes || [],
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -539,6 +571,9 @@ app.get('/api/analysis', async (req, res) => {
       excludedEnd: analysis.excluded_end,
       effectiveDuration: analysis.effective_duration,
       fullDuration: analysis.full_duration,
+      // Transcript data
+      transcriptText: analysis.transcript_text,
+      extractedJokes: analysis.extracted_jokes || [],
       createdAt: analysis.created_at,
       updatedAt: analysis.updated_at
     }));
@@ -587,6 +622,9 @@ app.get('/api/analysis/:id', async (req, res) => {
       excludedEnd: data.excluded_end,
       effectiveDuration: data.effective_duration,
       fullDuration: data.full_duration,
+      // Transcript data
+      transcriptText: data.transcript_text,
+      extractedJokes: data.extracted_jokes || [],
       createdAt: data.created_at,
       updatedAt: data.updated_at
     };

@@ -14,6 +14,15 @@ ADD COLUMN IF NOT EXISTS excluded_end INTEGER DEFAULT 0,
 ADD COLUMN IF NOT EXISTS effective_duration INTEGER,
 ADD COLUMN IF NOT EXISTS full_duration INTEGER;
 
+-- Add columns for transcript-based analysis
+ALTER TABLE analysis_results
+ADD COLUMN IF NOT EXISTS transcript_text TEXT,
+ADD COLUMN IF NOT EXISTS extracted_jokes JSONB DEFAULT '[]';
+
+-- Make set_id optional (nullable) for transcript-based analysis
+ALTER TABLE analysis_results
+ALTER COLUMN set_id DROP NOT NULL;
+
 -- Add indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_analysis_category ON analysis_results(category);
 CREATE INDEX IF NOT EXISTS idx_analysis_created_at ON analysis_results(created_at DESC);

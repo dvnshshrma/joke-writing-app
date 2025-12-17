@@ -43,7 +43,21 @@ A web application for stand-up comedians to organize, edit, and manage versions 
 - **Laugh Moments**: Detected pauses where audience laughed
 - **Performance Tips**: AI-generated suggestions for improvement
 - **Top Performing Jokes**: Ranking of your best jokes
-- **Set Duration Tracking**: Analyzed vs total time metrics 
+- **Set Duration Tracking**: Analyzed vs total time metrics
+
+### ✅ Video Analysis Support (Implemented)
+- **Video Upload**: Upload MP4, MOV, WEBM video recordings
+- **Audio Extraction**: Automatically extracts audio from video for analysis
+- **Same Metrics**: All audio analysis features work with video files
+- **Large File Support**: Up to 500MB file uploads
+
+### ✅ Performance Trends (Implemented)
+- **Progress Tracking**: See improvement over time (LPM change since first analysis)
+- **Trend Chart**: Interactive graph showing LPM across all performances
+- **Category Breakdown**: Visual count of Good/Average/Bad sets
+- **Best/Worst Performance**: Highlight your peak and low points
+- **Performance History**: Complete list of all analyzed sets with metrics
+- **Hover Details**: Interactive tooltips on trend chart for detailed data 
 
 ## Getting Started
 
@@ -287,10 +301,8 @@ joke-writing-app/
 - Mobile responsive design
 
 ### 🚧 In Progress / Planned
-- Video analysis support
-- Performance comparison over time
 - Export/import functionality
-- Historical trend analysis
+- Advanced joke recommendations based on analysis
 
 ## API Endpoints
 
