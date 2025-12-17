@@ -1,11 +1,27 @@
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import './Homepage.css'
 
 function Homepage() {
   const navigate = useNavigate()
+  const { user, signOut, isAuthEnabled } = useAuth()
+
+  const handleSignOut = async () => {
+    await signOut()
+  }
 
   return (
     <div className="homepage">
+      {isAuthEnabled && user && (
+        <div className="user-bar">
+          <span className="user-info">
+            👋 {user.user_metadata?.full_name || user.email}
+          </span>
+          <button className="logout-btn" onClick={handleSignOut}>
+            Sign Out
+          </button>
+        </div>
+      )}
       <div className="homepage-container">
         <h1 className="app-title">Comedica</h1>
         <p className="app-subtitle">Your companion for writing jokes and managing sets</p>

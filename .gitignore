@@ -45,3 +45,4 @@ Thumbs.db
 # Build outputs
 build
 *.tsbuildinfo
+.vercel

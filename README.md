@@ -111,12 +111,17 @@ cd ..
 Create `server/.env`:
 ```env
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_KEY=your_anon_key_here
-DB_NAME=comedica
+SUPABASE_KEY=your_service_role_key_here
 PORT=3001
 
 # Optional: For real AI audio analysis (get free key at https://www.assemblyai.com)
 ASSEMBLYAI_API_KEY=your_assemblyai_api_key_here
+```
+
+Create `.env` in root directory (for frontend):
+```env
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your_anon_key_here
 ```
 
 > **Note**: Without an AssemblyAI API key, the app uses simulated analysis data. The free tier includes 100 hours of audio analysis.
@@ -338,9 +343,17 @@ joke-writing-app/
 - **Set Builder**: Pre-built set recommendations (Power Set, Test Run Set)
 - **Set Building Tips**: Expert advice on structuring your set
 
+### ✅ User Authentication (Implemented)
+- **Google Sign-In**: Quick login with Google account
+- **Facebook Sign-In**: Login with Facebook account
+- **Email/Password**: Traditional email registration and login
+- **Multi-User Support**: Each user has their own private data
+- **Row Level Security**: Data isolation enforced at database level
+- **Session Management**: Persistent login across sessions
+
 ### 🚧 In Progress / Planned
-- Cloud sync across devices
 - Collaboration features
+- Social sharing of sets
 
 ## API Endpoints
 

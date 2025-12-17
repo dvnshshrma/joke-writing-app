@@ -25,6 +25,26 @@ const upload = multer({
 app.use(cors());
 app.use(express.json());
 
+// Auth middleware to extract user from JWT
+const extractUser = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7);
+    try {
+      const { data: { user }, error } = await supabase.auth.getUser(token);
+      if (!error && user) {
+        req.user = user;
+      }
+    } catch (e) {
+      console.log('Auth error:', e.message);
+    }
+  }
+  next();
+};
+
+app.use(extractUser);
+
 // Initialize database on startup
 (async () => {
   try {
@@ -35,22 +55,31 @@ app.use(express.json());
   }
 })();
 
-// Get all jokes
+// Get all jokes (filtered by user if authenticated)
 app.get('/api/jokes', async (req, res) => {
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('jokes')
       .select('*')
       .order('updated_at', { ascending: false });
     
+    // Filter by user if authenticated
+    if (req.user) {
+      query = query.eq('user_id', req.user.id);
+    } else {
+      query = query.is('user_id', null);
+    }
+    
+    const { data, error } = await query;
+    
     if (error) throw error;
     
-    // Convert Supabase format to API format
     const parsedJokes = (data || []).map(joke => ({
       id: joke.id,
       header: joke.header,
       sections: joke.sections || [],
       isDraft: joke.is_draft !== false,
+      isOneLiner: joke.is_one_liner || false,
       comments: joke.comments || {},
       strikethroughTexts: joke.strikethrough_texts || [],
       replacements: joke.replacements || {},
@@ -124,7 +153,8 @@ app.post('/api/jokes', async (req, res) => {
       strikethrough_texts: strikethroughTexts || [],
       replacements: replacements || {},
       created_at: createdAt || new Date().toISOString(),
-      updated_at: updatedAt || new Date().toISOString()
+      updated_at: updatedAt || new Date().toISOString(),
+      user_id: req.user?.id || null
     };
     
     const { error } = await supabase

@@ -1,34 +1,41 @@
+import { supabase } from '../lib/supabase';
+
 // Auto-detect API URL based on environment
-// For local dev: use IP address when accessing from phone, localhost when on computer
-// For production: use VITE_API_URL env variable (set in Vercel)
 const getApiBaseUrl = () => {
-  // If VITE_API_URL is set (production or explicit config), use it
   if (import.meta.env.VITE_API_URL) {
     return import.meta.env.VITE_API_URL;
   }
   
-  // For local development, detect if we're on a mobile device or different origin
-  // If accessing from phone, use the computer's IP (should be set in .env)
-  // Otherwise, use localhost
   const hostname = window.location.hostname;
   if (hostname === 'localhost' || hostname === '127.0.0.1') {
     return 'http://localhost:3001/api';
   }
   
-  // If accessing via IP address, use that IP for API
   return `http://${hostname}:3001/api`;
 };
 
 const API_BASE_URL = getApiBaseUrl();
 
+// Get auth headers for API requests
+const getAuthHeaders = async () => {
+  const headers = { 'Content-Type': 'application/json' };
+  
+  if (supabase) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      headers['Authorization'] = `Bearer ${session.access_token}`;
+    }
+  }
+  
+  return headers;
+};
+
 export const jokesAPI = {
-  // Get all jokes
   async getAll() {
     try {
-      const response = await fetch(`${API_BASE_URL}/jokes`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch jokes');
-      }
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE_URL}/jokes`, { headers });
+      if (!response.ok) throw new Error('Failed to fetch jokes');
       return await response.json();
     } catch (error) {
       console.error('Error fetching jokes:', error);
@@ -36,14 +43,12 @@ export const jokesAPI = {
     }
   },
 
-  // Get a single joke by ID
   async getById(id) {
     try {
-      const response = await fetch(`${API_BASE_URL}/jokes/${id}`);
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE_URL}/jokes/${id}`, { headers });
       if (!response.ok) {
-        if (response.status === 404) {
-          return null;
-        }
+        if (response.status === 404) return null;
         throw new Error('Failed to fetch joke');
       }
       return await response.json();
@@ -53,21 +58,15 @@ export const jokesAPI = {
     }
   },
 
-  // Create a new joke
   async create(jokeData) {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(`${API_BASE_URL}/jokes`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify(jokeData),
       });
-      
-      if (!response.ok) {
-        throw new Error('Failed to create joke');
-      }
-      
+      if (!response.ok) throw new Error('Failed to create joke');
       return await response.json();
     } catch (error) {
       console.error('Error creating joke:', error);
@@ -75,21 +74,15 @@ export const jokesAPI = {
     }
   },
 
-  // Update an existing joke
   async update(id, jokeData) {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(`${API_BASE_URL}/jokes/${id}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify(jokeData),
       });
-      
-      if (!response.ok) {
-        throw new Error('Failed to update joke');
-      }
-      
+      if (!response.ok) throw new Error('Failed to update joke');
       return await response.json();
     } catch (error) {
       console.error('Error updating joke:', error);
@@ -97,17 +90,14 @@ export const jokesAPI = {
     }
   },
 
-  // Delete a joke
   async delete(id) {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(`${API_BASE_URL}/jokes/${id}`, {
         method: 'DELETE',
+        headers,
       });
-      
-      if (!response.ok) {
-        throw new Error('Failed to delete joke');
-      }
-      
+      if (!response.ok) throw new Error('Failed to delete joke');
       return await response.json();
     } catch (error) {
       console.error('Error deleting joke:', error);
