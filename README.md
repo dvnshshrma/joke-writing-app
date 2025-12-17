@@ -263,7 +263,9 @@ joke-writing-app/
 │   │   ├── ShortSetEditor.jsx   # Editor for short sets (open mics)
 │   │   ├── LongSetEditor.jsx    # Editor for long sets
 │   │   ├── SavedSetsList.jsx    # List and management of saved sets
-│   │   └── Analysis.jsx         # Performance analysis section
+│   │   ├── Analysis.jsx         # Performance analysis section
+│   │   ├── JokeRecommendations.jsx  # AI-powered joke recommendations
+│   │   ├── DataManager.jsx      # Export/import data manager
 │   ├── services/
 │   │   ├── api.js               # API service for jokes
 │   │   ├── setsAPI.js           # API service for sets
@@ -287,7 +289,7 @@ joke-writing-app/
 ## Development Status
 
 ### ✅ Completed
-- Homepage with navigation (Joke, Set, Analyse your sets)
+- Homepage with navigation (Joke, Set, Analyse, Recommendations, Export/Import)
 - Joke Writing section with three options:
   - Write new jokes
   - Work on old jokes
@@ -316,10 +318,29 @@ joke-writing-app/
 - Cloud database persistence (Supabase)
 - RESTful API backend
 - Mobile responsive design
+- Export/Import data manager
+- AI-powered joke recommendations
+- Performance trends with exclusion and sorting
+- Interval-by-interval comparison
+- **Full Data Export**: Export jokes, one-liners, sets, and analyses to JSON
+- **Selective Export**: Choose which data types to include
+- **Easy Import**: Upload backup files to restore data
+- **Preview Before Import**: See what's in a backup file before importing
+- **Timestamped Backups**: Auto-named files with export date
+
+### ✅ AI Joke Recommendations (Implemented)
+- **Top Performers**: See which jokes get the most laughs
+- **Needs Work**: Identify jokes that aren't landing
+- **Rising Stars**: Track jokes that are improving over time
+- **Untested Material**: See which jokes haven't been performed yet
+- **Best Topics**: Discover which comedy topics work best for you
+- **Key Insights**: AI-generated actionable advice
+- **Set Builder**: Pre-built set recommendations (Power Set, Test Run Set)
+- **Set Building Tips**: Expert advice on structuring your set
 
 ### 🚧 In Progress / Planned
-- Export/import functionality
-- Advanced joke recommendations based on analysis
+- Cloud sync across devices
+- Collaboration features
 
 ## API Endpoints
 

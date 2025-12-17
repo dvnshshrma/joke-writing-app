@@ -99,6 +99,26 @@
   color: white;
 }
 
+.recommendations-option:hover {
+  background: linear-gradient(135deg, #f2994a 0%, #f2c94c 100%);
+  color: white;
+}
+
+.recommendations-option:hover h2,
+.recommendations-option:hover p {
+  color: white;
+}
+
+.data-option:hover {
+  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+  color: white;
+}
+
+.data-option:hover h2,
+.data-option:hover p {
+  color: white;
+}
+
 @media (max-width: 768px) {
   .app-title {
     font-size: 2.5rem;
