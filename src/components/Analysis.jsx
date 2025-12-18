@@ -297,9 +297,38 @@ function Analysis() {
       }
 
       const result = await analysisAPI.analyze(formData)
+
+      // Production (AssemblyAI): server may return a job to poll.
+      if (result && result.status === 'processing' && result.jobId) {
+        const jobId = result.jobId
+        const meta = {
+          setId: result.setId || '',
+          setName: result.setName || setName.trim(),
+          audioDuration: audioDuration || '',
+          excludeStartSeconds: excludeStart || 0,
+          excludeEndSeconds: excludeEnd || 0,
+          audioFileName: audioFile?.name || ''
+        }
+
+        // Poll until completed
+        const maxWaitMs = 10 * 60 * 1000 // 10 minutes
+        const start = Date.now()
+        while (Date.now() - start < maxWaitMs) {
+          await new Promise(r => setTimeout(r, 3000))
+          const statusRes = await analysisAPI.getJob(jobId, meta)
+          if (statusRes.status === 'completed' || statusRes.id) {
+            setAnalysisResult(statusRes)
+            setActiveTab('new')
+            alert('✅ Analysis complete!')
+            return
+          }
+        }
+        throw new Error('Analysis is taking too long. Please try again in a minute.')
+      }
+
       setAnalysisResult(result)
       setActiveTab('new') // Stay on new tab to show results
-      alert('✅ Analysis complete! Jokes extracted from transcript.')
+      alert('✅ Analysis complete!')
     } catch (error) {
       console.error('Error analyzing audio:', error)
       const errorMessage = error.message || 'Unknown error'

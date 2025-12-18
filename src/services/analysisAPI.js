@@ -38,6 +38,8 @@ const IS_SAME_ORIGIN_SERVERLESS =
   typeof window !== 'undefined' &&
   normalizeApiBaseUrl(API_BASE_URL) === SAME_ORIGIN_API_BASE_URL;
 
+const ANALYSIS_UPLOAD_BUCKET = 'analysis-media';
+
 const getAuthHeaders = async (isFormData = false) => {
   const headers = {};
   if (!isFormData) {
@@ -50,6 +52,27 @@ const getAuthHeaders = async (isFormData = false) => {
     }
   }
   return headers;
+};
+
+const uploadFileToSupabaseStorage = async (file) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  if (!file) throw new Error('No file provided');
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('You must be logged in to analyze');
+
+  const safeName = `${Date.now()}-${String(file.name || 'upload').replace(/[^\w.\-]+/g, '_')}`;
+  const path = `${user.id}/${safeName}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from(ANALYSIS_UPLOAD_BUCKET)
+    .upload(path, file, { upsert: true, contentType: file.type || 'application/octet-stream' });
+
+  if (uploadError) {
+    throw new Error(uploadError.message || 'Failed to upload file for analysis');
+  }
+
+  return { bucket: ANALYSIS_UPLOAD_BUCKET, path };
 };
 
 export const analysisAPI = {
@@ -66,6 +89,9 @@ export const analysisAPI = {
         const excludeEndSeconds = formData.get('excludeEndSeconds') ? Number(formData.get('excludeEndSeconds')) : 0;
         const file = formData.get('audio');
 
+        // For real AI analysis in production: upload media to Supabase Storage, then let serverless send a signed URL to AssemblyAI.
+        const storage = await uploadFileToSupabaseStorage(file);
+
         const payload = {
           setId: `${Date.now()}`, // analysis_results requires set_id (NOT NULL)
           setName,
@@ -73,6 +99,8 @@ export const analysisAPI = {
           excludeStartSeconds,
           excludeEndSeconds,
           audioFileName: file && typeof file === 'object' && 'name' in file ? file.name : null,
+          storageBucket: storage.bucket,
+          storagePath: storage.path,
         };
 
         const headers = await getAuthHeaders(false);
@@ -97,6 +125,27 @@ export const analysisAPI = {
       return await response.json();
     } catch (error) {
       console.error('Error analyzing audio:', error);
+      throw error;
+    }
+  },
+
+  async getJob(jobId, meta = {}) {
+    try {
+      const headers = await getAuthHeaders();
+      const params = new URLSearchParams();
+      Object.entries(meta).forEach(([k, v]) => {
+        if (v === undefined || v === null || v === '') return;
+        params.set(k, String(v));
+      });
+      const url = `${API_BASE_URL}/analysis/job/${encodeURIComponent(jobId)}?${params.toString()}`;
+      const response = await fetch(url, { headers });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to check analysis status');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error checking analysis job:', error);
       throw error;
     }
   },

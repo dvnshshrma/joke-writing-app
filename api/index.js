@@ -11,6 +11,9 @@ if (!supabaseUrl || !supabaseKey) {
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
+const ASSEMBLYAI_BASE_URL = 'https://api.assemblyai.com/v2';
+
 // ---------- Analysis helpers (serverless / mock) ----------
 const buildMockTimeline = (effectiveDurationSeconds, stepSeconds = 10) => {
   const timeline = [];
@@ -55,6 +58,65 @@ const categorize = (lpm, avg) => {
   if (lpm >= 8 && avg >= 8) return 'good';
   if (lpm < 4 || avg < 4) return 'bad';
   return 'average';
+};
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const fetchAssemblyAI = async (path, opts = {}) => {
+  if (!ASSEMBLYAI_API_KEY) {
+    throw new Error('ASSEMBLYAI_API_KEY is missing in server environment');
+  }
+  const res = await fetch(`${ASSEMBLYAI_BASE_URL}${path}`, {
+    ...opts,
+    headers: {
+      Authorization: ASSEMBLYAI_API_KEY,
+      'Content-Type': 'application/json',
+      ...(opts.headers || {}),
+    },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || data.message || `AssemblyAI error (${res.status})`);
+  }
+  return data;
+};
+
+const computeLaughTimelineFromWords = (words = [], effectiveDurationSeconds = 0, stepSeconds = 10) => {
+  // Heuristic: treat long pauses as laugh moments.
+  // This is not true "laughter detection", but gives a useful approximation without extra models.
+  const buckets = new Array(Math.floor((effectiveDurationSeconds || 0) / stepSeconds) + 1).fill(0);
+  const gapThresholdMs = 1200;
+  for (let i = 1; i < words.length; i++) {
+    const gap = (words[i].start ?? 0) - (words[i - 1].end ?? 0);
+    if (gap >= gapThresholdMs) {
+      const t = Math.max(0, Math.floor((words[i - 1].end ?? 0) / 1000));
+      const idx = Math.min(buckets.length - 1, Math.floor(t / stepSeconds));
+      buckets[idx] += 1;
+    }
+  }
+  return buckets.map((laughs, i) => ({ time: i * stepSeconds, laughs }));
+};
+
+const buildJokeMetricsFromTranscript = async ({ user, transcriptText }) => {
+  // Map jokes to user headers using a simple keyword overlap.
+  let headers = [];
+  try {
+    if (user) {
+      const { data } = await supabase
+        .from('jokes')
+        .select('header')
+        .eq('user_id', user.id)
+        .order('updated_at', { ascending: false })
+        .limit(30);
+      headers = (data || []).map(r => r.header).filter(Boolean);
+    }
+  } catch (_) {}
+
+  const fallbackCount = 6;
+  const baseHeaders = headers.length ? headers.slice(0, Math.max(4, Math.min(12, headers.length))) : Array.from({ length: fallbackCount }, (_, i) => `Joke ${i + 1}`);
+
+  // No real per-joke laugh mapping without detailed laughter detection; distribute laughs proportionally by segment length.
+  return baseHeaders.map((h, i) => ({ jokeIndex: i, header: h, laughs: 0 }));
 };
 
 // Helper to extract user from JWT
@@ -313,7 +375,9 @@ export default async function handler(req, res) {
           audioDuration,
           excludeStartSeconds = 0,
           excludeEndSeconds = 0,
-          audioFileName = null
+          audioFileName = null,
+          storageBucket = null,
+          storagePath = null
         } = body || {};
 
         if (!setId) return res.status(400).json({ error: 'setId is required' });
@@ -324,6 +388,39 @@ export default async function handler(req, res) {
         const excludedEnd = Math.max(0, parseInt(excludeEndSeconds, 10) || 0);
         const effectiveDuration = Math.max(0, fullDuration - excludedStart - excludedEnd);
 
+        // If AssemblyAI key + storage path exist: kick off real transcription job and return jobId for polling.
+        if (ASSEMBLYAI_API_KEY && storageBucket && storagePath) {
+          // Signed URL so AssemblyAI can download.
+          const { data: signed, error: signedErr } = await supabase
+            .storage
+            .from(storageBucket)
+            .createSignedUrl(storagePath, 60 * 60);
+          if (signedErr) throw signedErr;
+
+          const job = await fetchAssemblyAI('/transcript', {
+            method: 'POST',
+            body: JSON.stringify({
+              audio_url: signed.signedUrl,
+              punctuate: true,
+              format_text: true,
+              // Helpful extras (not required)
+              auto_chapters: true,
+            }),
+          });
+
+          return res.json({
+            status: 'processing',
+            jobId: job.id,
+            setId,
+            setName,
+            excludedStart,
+            excludedEnd,
+            effectiveDuration,
+            fullDuration
+          });
+        }
+
+        // Fallback to mock analysis if no key / no storage upload.
         const timeline = buildMockTimeline(effectiveDuration, 10);
         const { jokeMetrics, totalLaughs } = await buildMockJokeMetrics({ user, setName });
         const avgLaughsPerJoke = jokeMetrics.length ? totalLaughs / jokeMetrics.length : 0;
@@ -363,6 +460,119 @@ export default async function handler(req, res) {
           effectiveDuration,
           fullDuration,
           isMockData: true
+        });
+      }
+    }
+
+    // Poll an AssemblyAI transcript job; once complete, compute metrics + persist analysis.
+    const jobMatch = path.match(/^\/analysis\/job\/([^/]+)$/);
+    if (jobMatch) {
+      const jobId = jobMatch[1];
+      if (method === 'GET') {
+        if (!ASSEMBLYAI_API_KEY) return res.status(400).json({ error: 'ASSEMBLYAI_API_KEY is missing on server' });
+
+        const setId = req.query?.setId || null;
+        const setName = req.query?.setName || null;
+        const audioDuration = req.query?.audioDuration ? parseInt(req.query.audioDuration, 10) : null;
+        const excludeStartSeconds = req.query?.excludeStartSeconds ? parseInt(req.query.excludeStartSeconds, 10) : 0;
+        const excludeEndSeconds = req.query?.excludeEndSeconds ? parseInt(req.query.excludeEndSeconds, 10) : 0;
+        const audioFileName = req.query?.audioFileName || null;
+
+        const job = await fetchAssemblyAI(`/transcript/${jobId}`, { method: 'GET' });
+        if (job.status !== 'completed') {
+          if (job.status === 'error') {
+            return res.status(500).json({ error: job.error || 'AssemblyAI job failed', status: 'error' });
+          }
+          return res.json({ status: job.status, jobId });
+        }
+
+        // Already saved? (id = jobId)
+        const existing = await supabase.from('analysis_results').select('*').eq('id', jobId).maybeSingle();
+        if (existing?.data) {
+          const a = existing.data;
+          return res.json({
+            id: a.id,
+            setName: a.set_name,
+            laughsPerMinute: a.laughs_per_minute,
+            avgLaughsPerJoke: a.avg_laughs_per_joke,
+            category: a.category,
+            timeline: a.timeline || [],
+            jokeMetrics: a.joke_metrics || [],
+            transcriptText: a.transcript_text || job.text || '',
+            isMockData: false
+          });
+        }
+
+        const fullDuration = audioDuration || Math.ceil((job.audio_duration || 300));
+        const excludedStart = Math.max(0, excludeStartSeconds || 0);
+        const excludedEnd = Math.max(0, excludeEndSeconds || 0);
+        const effectiveDuration = Math.max(0, fullDuration - excludedStart - excludedEnd);
+
+        // Build timeline from pauses (words with timestamps)
+        const timeline = computeLaughTimelineFromWords(job.words || [], effectiveDuration, 10);
+        const totalLaughs = timeline.reduce((s, p) => s + (p.laughs || 0), 0);
+        const laughsPerMinute = effectiveDuration > 0 ? (totalLaughs / effectiveDuration) * 60 : 0;
+
+        let jokeMetrics = await buildJokeMetricsFromTranscript({ user, transcriptText: job.text || '' });
+        // Distribute laughs evenly across jokes for display (until we do true laughter-to-joke alignment)
+        if (jokeMetrics.length) {
+          const per = Math.floor(totalLaughs / jokeMetrics.length);
+          let rem = totalLaughs - per * jokeMetrics.length;
+          jokeMetrics = jokeMetrics.map(j => {
+            const add = rem > 0 ? 1 : 0;
+            rem -= add;
+            return { ...j, laughs: per + add };
+          });
+        }
+        const avgLaughsPerJoke = jokeMetrics.length ? totalLaughs / jokeMetrics.length : 0;
+        const category = categorize(laughsPerMinute, avgLaughsPerJoke);
+
+        const analysisDoc = {
+          id: jobId,
+          set_id: setId || `${Date.now()}`,
+          set_name: setName || 'Untitled Set',
+          audio_file_name: audioFileName,
+          laughs_per_minute: Number(laughsPerMinute.toFixed(2)),
+          avg_laughs_per_joke: Number(avgLaughsPerJoke.toFixed(2)),
+          category,
+          timeline,
+          joke_metrics: jokeMetrics,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          user_id: user?.id || null
+        };
+
+        // Try to save transcript text if the column exists; otherwise save without it.
+        const { error: insertErr1 } = await supabase.from('analysis_results').insert([{
+          ...analysisDoc,
+          transcript_text: job.text || ''
+        }]);
+        if (insertErr1) {
+          // Missing column? Retry without transcript_text
+          const msg = insertErr1.message || insertErr1.details || '';
+          if (msg.includes('transcript_text') || msg.includes('schema cache')) {
+            const { error: insertErr2 } = await supabase.from('analysis_results').insert([analysisDoc]);
+            if (insertErr2) throw insertErr2;
+          } else {
+            throw insertErr1;
+          }
+        }
+
+        return res.json({
+          status: 'completed',
+          id: jobId,
+          setName: analysisDoc.set_name,
+          laughsPerMinute: analysisDoc.laughs_per_minute,
+          avgLaughsPerJoke: analysisDoc.avg_laughs_per_joke,
+          category,
+          timeline,
+          jokeMetrics,
+          transcriptText: job.text || '',
+          isMockData: false,
+          excludedStart,
+          excludedEnd,
+          effectiveDuration,
+          fullDuration
         });
       }
     }
