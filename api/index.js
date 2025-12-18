@@ -3,13 +3,25 @@ import { createClient } from '@supabase/supabase-js';
 
 // Initialize Supabase
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+// IMPORTANT:
+// - The serverless API needs a SERVICE ROLE key to write rows when RLS is enabled.
+// - The frontend must use the ANON key.
+const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
 
-if (!supabaseUrl || !supabaseKey) {
+if (!supabaseUrl) {
   console.error('Missing Supabase credentials');
 }
 
-const supabase = createClient(supabaseUrl, supabaseKey);
+// Admin client (bypasses RLS) for server-side inserts/updates.
+const supabaseAdmin = supabaseUrl && supabaseServiceRoleKey
+  ? createClient(supabaseUrl, supabaseServiceRoleKey)
+  : null;
+
+// Public client (RLS-enforced) used only for auth user lookup as a fallback.
+const supabasePublic = supabaseUrl && supabaseAnonKey
+  ? createClient(supabaseUrl, supabaseAnonKey)
+  : null;
 
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
 const ASSEMBLYAI_BASE_URL = 'https://api.assemblyai.com/v2';
@@ -125,7 +137,10 @@ const extractUser = async (req) => {
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.substring(7);
     try {
-      const { data: { user }, error } = await supabase.auth.getUser(token);
+      // Prefer admin client (works even if anon key missing in server env)
+      const client = supabaseAdmin || supabasePublic;
+      if (!client) return null;
+      const { data: { user }, error } = await client.auth.getUser(token);
       if (!error && user) return user;
     } catch (e) {
       console.log('Auth error:', e.message);
@@ -149,10 +164,20 @@ export default async function handler(req, res) {
   const path = url.replace('/api', '');
 
   try {
+    if (!supabaseAdmin) {
+      // Read-only endpoints may still work, but analysis insert + signed URL needs admin.
+      // Provide a clear setup message instead of opaque RLS errors.
+      if (path.startsWith('/analysis')) {
+        return res.status(500).json({
+          error: 'Server is missing SUPABASE_SERVICE_ROLE_KEY (required for analysis inserts under RLS). Add it in Vercel env vars and redeploy.'
+        });
+      }
+    }
+
     // JOKES ENDPOINTS
     if (path === '/jokes' || path === '/jokes/') {
       if (method === 'GET') {
-        let query = supabase.from('jokes').select('*').order('updated_at', { ascending: false });
+        let query = supabaseAdmin.from('jokes').select('*').order('updated_at', { ascending: false });
         if (user) {
           query = query.eq('user_id', user.id);
         } else {
@@ -191,7 +216,7 @@ export default async function handler(req, res) {
           updated_at: new Date().toISOString(),
           user_id: user?.id || null
         };
-        const { error } = await supabase.from('jokes').insert([jokeDoc]);
+        const { error } = await supabaseAdmin.from('jokes').insert([jokeDoc]);
         if (error) throw error;
         return res.json({ message: 'Joke created', id });
       }
@@ -203,7 +228,7 @@ export default async function handler(req, res) {
       const jokeId = jokeMatch[1];
       
       if (method === 'GET') {
-        const { data, error } = await supabase.from('jokes').select('*').eq('id', jokeId).single();
+        const { data, error } = await supabaseAdmin.from('jokes').select('*').eq('id', jokeId).single();
         if (error) {
           if (error.code === 'PGRST116') return res.status(404).json({ error: 'Joke not found' });
           throw error;
@@ -224,7 +249,7 @@ export default async function handler(req, res) {
       
       if (method === 'PUT') {
         const { header, sections, isDraft, comments, strikethroughTexts, replacements, isOneLiner } = body;
-        const { error } = await supabase.from('jokes').update({
+        const { error } = await supabaseAdmin.from('jokes').update({
           header: header || '',
           sections: sections || [],
           is_draft: isDraft !== false,
@@ -239,7 +264,7 @@ export default async function handler(req, res) {
       }
       
       if (method === 'DELETE') {
-        const { error } = await supabase.from('jokes').delete().eq('id', jokeId);
+        const { error } = await supabaseAdmin.from('jokes').delete().eq('id', jokeId);
         if (error) throw error;
         return res.json({ message: 'Joke deleted' });
       }
@@ -248,7 +273,7 @@ export default async function handler(req, res) {
     // SETS ENDPOINTS
     if (path === '/sets' || path === '/sets/') {
       if (method === 'GET') {
-        let query = supabase.from('sets').select('*').order('updated_at', { ascending: false });
+        let query = supabaseAdmin.from('sets').select('*').order('updated_at', { ascending: false });
         if (user) {
           query = query.eq('user_id', user.id);
         } else {
@@ -285,7 +310,7 @@ export default async function handler(req, res) {
           updated_at: new Date().toISOString(),
           user_id: user?.id || null
         };
-        const { error } = await supabase.from('sets').insert([setDoc]);
+        const { error } = await supabaseAdmin.from('sets').insert([setDoc]);
         if (error) throw error;
         return res.json({ message: 'Set created', id });
       }
@@ -297,7 +322,7 @@ export default async function handler(req, res) {
       const setId = setMatch[1];
       
       if (method === 'GET') {
-        const { data, error } = await supabase.from('sets').select('*').eq('id', setId).single();
+        const { data, error } = await supabaseAdmin.from('sets').select('*').eq('id', setId).single();
         if (error) {
           if (error.code === 'PGRST116') return res.status(404).json({ error: 'Set not found' });
           throw error;
@@ -317,7 +342,7 @@ export default async function handler(req, res) {
       
       if (method === 'PUT') {
         const { header, type, jokes, jokeDetails, transitions, isDraft } = body;
-        const { error } = await supabase.from('sets').update({
+        const { error } = await supabaseAdmin.from('sets').update({
           header: header || '',
           type: type || 'short',
           jokes: jokes || [],
@@ -331,7 +356,7 @@ export default async function handler(req, res) {
       }
       
       if (method === 'DELETE') {
-        const { error } = await supabase.from('sets').delete().eq('id', setId);
+        const { error } = await supabaseAdmin.from('sets').delete().eq('id', setId);
         if (error) throw error;
         return res.json({ message: 'Set deleted' });
       }
@@ -340,7 +365,7 @@ export default async function handler(req, res) {
     // ANALYSIS ENDPOINTS
     if (path === '/analysis' || path === '/analysis/') {
       if (method === 'GET') {
-        let query = supabase.from('analysis_results').select('*').order('created_at', { ascending: false });
+        let query = supabaseAdmin.from('analysis_results').select('*').order('created_at', { ascending: false });
         if (user) {
           query = query.eq('user_id', user.id);
         } else {
@@ -391,7 +416,7 @@ export default async function handler(req, res) {
         // If AssemblyAI key + storage path exist: kick off real transcription job and return jobId for polling.
         if (ASSEMBLYAI_API_KEY && storageBucket && storagePath) {
           // Signed URL so AssemblyAI can download.
-          const { data: signed, error: signedErr } = await supabase
+          const { data: signed, error: signedErr } = await supabaseAdmin
             .storage
             .from(storageBucket)
             .createSignedUrl(storagePath, 60 * 60);
@@ -443,7 +468,7 @@ export default async function handler(req, res) {
           user_id: user?.id || null
         };
 
-        const { error } = await supabase.from('analysis_results').insert([analysisDoc]);
+        const { error } = await supabaseAdmin.from('analysis_results').insert([analysisDoc]);
         if (error) throw error;
 
         return res.json({
@@ -582,7 +607,7 @@ export default async function handler(req, res) {
       const analysisId = analysisMatch[1];
       
       if (method === 'GET') {
-        const { data, error } = await supabase.from('analysis_results').select('*').eq('id', analysisId).single();
+        const { data, error } = await supabaseAdmin.from('analysis_results').select('*').eq('id', analysisId).single();
         if (error) {
           if (error.code === 'PGRST116') return res.status(404).json({ error: 'Analysis not found' });
           throw error;
@@ -602,7 +627,7 @@ export default async function handler(req, res) {
       }
       
       if (method === 'DELETE') {
-        const { error } = await supabase.from('analysis_results').delete().eq('id', analysisId);
+        const { error } = await supabaseAdmin.from('analysis_results').delete().eq('id', analysisId);
         if (error) throw error;
         return res.json({ message: 'Analysis deleted' });
       }
