@@ -184,20 +184,20 @@ export default async function handler(req, res) {
           query = query.is('user_id', null);
         }
         const { data, error } = await query;
-        if (error) throw error;
-        
-        const parsedJokes = (data || []).map(joke => ({
-          id: joke.id,
-          header: joke.header,
-          sections: joke.sections || [],
-          isDraft: joke.is_draft !== false,
+    if (error) throw error;
+    
+    const parsedJokes = (data || []).map(joke => ({
+      id: joke.id,
+      header: joke.header,
+      sections: joke.sections || [],
+      isDraft: joke.is_draft !== false,
           isOneLiner: joke.is_one_liner || false,
-          comments: joke.comments || {},
-          strikethroughTexts: joke.strikethrough_texts || [],
-          replacements: joke.replacements || {},
-          createdAt: joke.created_at,
-          updatedAt: joke.updated_at
-        }));
+      comments: joke.comments || {},
+      strikethroughTexts: joke.strikethrough_texts || [],
+      replacements: joke.replacements || {},
+      createdAt: joke.created_at,
+      updatedAt: joke.updated_at
+    }));
         return res.json(parsedJokes);
       }
       
@@ -234,38 +234,38 @@ export default async function handler(req, res) {
           throw error;
         }
         return res.json({
-          id: data.id,
-          header: data.header,
-          sections: data.sections || [],
-          isDraft: data.is_draft !== false,
+      id: data.id,
+      header: data.header,
+      sections: data.sections || [],
+      isDraft: data.is_draft !== false,
           isOneLiner: data.is_one_liner || false,
-          comments: data.comments || {},
-          strikethroughTexts: data.strikethrough_texts || [],
-          replacements: data.replacements || {},
-          createdAt: data.created_at,
-          updatedAt: data.updated_at
+      comments: data.comments || {},
+      strikethroughTexts: data.strikethrough_texts || [],
+      replacements: data.replacements || {},
+      createdAt: data.created_at,
+      updatedAt: data.updated_at
         });
       }
       
       if (method === 'PUT') {
         const { header, sections, isDraft, comments, strikethroughTexts, replacements, isOneLiner } = body;
         const { error } = await supabaseAdmin.from('jokes').update({
-          header: header || '',
-          sections: sections || [],
-          is_draft: isDraft !== false,
+      header: header || '',
+      sections: sections || [],
+      is_draft: isDraft !== false,
           is_one_liner: isOneLiner || false,
-          comments: comments || {},
-          strikethrough_texts: strikethroughTexts || [],
-          replacements: replacements || {},
-          updated_at: new Date().toISOString()
+      comments: comments || {},
+      strikethrough_texts: strikethroughTexts || [],
+      replacements: replacements || {},
+      updated_at: new Date().toISOString()
         }).eq('id', jokeId);
-        if (error) throw error;
+    if (error) throw error;
         return res.json({ message: 'Joke updated' });
       }
       
       if (method === 'DELETE') {
         const { error } = await supabaseAdmin.from('jokes').delete().eq('id', jokeId);
-        if (error) throw error;
+    if (error) throw error;
         return res.json({ message: 'Joke deleted' });
       }
     }
@@ -280,19 +280,19 @@ export default async function handler(req, res) {
           query = query.is('user_id', null);
         }
         const { data, error } = await query;
-        if (error) throw error;
-        
-        const parsedSets = (data || []).map(set => ({
-          id: set.id,
-          header: set.header,
-          type: set.type,
-          jokes: set.jokes || [],
-          jokeDetails: set.joke_details || [],
-          transitions: set.transitions || [],
-          isDraft: set.is_draft !== undefined ? set.is_draft : true,
-          createdAt: set.created_at,
-          updatedAt: set.updated_at
-        }));
+    if (error) throw error;
+    
+    const parsedSets = (data || []).map(set => ({
+      id: set.id,
+      header: set.header,
+      type: set.type,
+      jokes: set.jokes || [],
+      jokeDetails: set.joke_details || [],
+      transitions: set.transitions || [],
+      isDraft: set.is_draft !== undefined ? set.is_draft : true,
+      createdAt: set.created_at,
+      updatedAt: set.updated_at
+    }));
         return res.json(parsedSets);
       }
       
@@ -328,26 +328,26 @@ export default async function handler(req, res) {
           throw error;
         }
         return res.json({
-          id: data.id,
-          header: data.header,
-          type: data.type,
-          jokes: data.jokes || [],
-          jokeDetails: data.joke_details || [],
-          transitions: data.transitions || [],
-          isDraft: data.is_draft !== undefined ? data.is_draft : true,
-          createdAt: data.created_at,
-          updatedAt: data.updated_at
+      id: data.id,
+      header: data.header,
+      type: data.type,
+      jokes: data.jokes || [],
+      jokeDetails: data.joke_details || [],
+      transitions: data.transitions || [],
+      isDraft: data.is_draft !== undefined ? data.is_draft : true,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at
         });
       }
       
       if (method === 'PUT') {
         const { header, type, jokes, jokeDetails, transitions, isDraft } = body;
         const { error } = await supabaseAdmin.from('sets').update({
-          header: header || '',
-          type: type || 'short',
-          jokes: jokes || [],
-          joke_details: jokeDetails || [],
-          transitions: transitions || [],
+      header: header || '',
+      type: type || 'short',
+      jokes: jokes || [],
+      joke_details: jokeDetails || [],
+      transitions: transitions || [],
           is_draft: isDraft,
           updated_at: new Date().toISOString()
         }).eq('id', setId);
@@ -512,7 +512,7 @@ export default async function handler(req, res) {
         }
 
         // Already saved? (id = jobId)
-        const existing = await supabase.from('analysis_results').select('*').eq('id', jobId).maybeSingle();
+        const existing = await supabaseAdmin.from('analysis_results').select('*').eq('id', jobId).maybeSingle();
         if (existing?.data) {
           const a = existing.data;
           return res.json({
@@ -536,8 +536,8 @@ export default async function handler(req, res) {
         // Build timeline from pauses (words with timestamps)
         const timeline = computeLaughTimelineFromWords(job.words || [], effectiveDuration, 10);
         const totalLaughs = timeline.reduce((s, p) => s + (p.laughs || 0), 0);
-        const laughsPerMinute = effectiveDuration > 0 ? (totalLaughs / effectiveDuration) * 60 : 0;
-
+  const laughsPerMinute = effectiveDuration > 0 ? (totalLaughs / effectiveDuration) * 60 : 0;
+  
         let jokeMetrics = await buildJokeMetricsFromTranscript({ user, transcriptText: job.text || '' });
         // Distribute laughs evenly across jokes for display (until we do true laughter-to-joke alignment)
         if (jokeMetrics.length) {
@@ -559,7 +559,7 @@ export default async function handler(req, res) {
           audio_file_name: audioFileName,
           laughs_per_minute: Number(laughsPerMinute.toFixed(2)),
           avg_laughs_per_joke: Number(avgLaughsPerJoke.toFixed(2)),
-          category,
+    category,
           timeline,
           joke_metrics: jokeMetrics,
           created_at: new Date().toISOString(),
@@ -568,7 +568,7 @@ export default async function handler(req, res) {
         };
 
         // Try to save transcript text if the column exists; otherwise save without it.
-        const { error: insertErr1 } = await supabase.from('analysis_results').insert([{
+        const { error: insertErr1 } = await supabaseAdmin.from('analysis_results').insert([{
           ...analysisDoc,
           transcript_text: job.text || ''
         }]);
@@ -576,7 +576,7 @@ export default async function handler(req, res) {
           // Missing column? Retry without transcript_text
           const msg = insertErr1.message || insertErr1.details || '';
           if (msg.includes('transcript_text') || msg.includes('schema cache')) {
-            const { error: insertErr2 } = await supabase.from('analysis_results').insert([analysisDoc]);
+            const { error: insertErr2 } = await supabaseAdmin.from('analysis_results').insert([analysisDoc]);
             if (insertErr2) throw insertErr2;
           } else {
             throw insertErr1;
@@ -586,7 +586,7 @@ export default async function handler(req, res) {
         return res.json({
           status: 'completed',
           id: jobId,
-          setName: analysisDoc.set_name,
+      setName: analysisDoc.set_name,
           laughsPerMinute: analysisDoc.laughs_per_minute,
           avgLaughsPerJoke: analysisDoc.avg_laughs_per_joke,
           category,
@@ -608,33 +608,33 @@ export default async function handler(req, res) {
       
       if (method === 'GET') {
         const { data, error } = await supabaseAdmin.from('analysis_results').select('*').eq('id', analysisId).single();
-        if (error) {
+    if (error) {
           if (error.code === 'PGRST116') return res.status(404).json({ error: 'Analysis not found' });
-          throw error;
-        }
+      throw error;
+    }
         return res.json({
-          id: data.id,
-          setId: data.set_id,
-          setName: data.set_name,
-          audioFileName: data.audio_file_name,
+      id: data.id,
+      setId: data.set_id,
+      setName: data.set_name,
+      audioFileName: data.audio_file_name,
           laughsPerMinute: data.laughs_per_minute,
           avgLaughsPerJoke: data.avg_laughs_per_joke,
-          category: data.category,
-          timeline: data.timeline || [],
-          jokeMetrics: data.joke_metrics || [],
+      category: data.category,
+      timeline: data.timeline || [],
+      jokeMetrics: data.joke_metrics || [],
           createdAt: data.created_at
         });
       }
       
       if (method === 'DELETE') {
         const { error } = await supabaseAdmin.from('analysis_results').delete().eq('id', analysisId);
-        if (error) throw error;
+    if (error) throw error;
         return res.json({ message: 'Analysis deleted' });
       }
     }
 
     return res.status(404).json({ error: 'Not found', path });
-    
+
   } catch (error) {
     console.error('API Error:', error);
     return res.status(500).json({ error: error.message });
