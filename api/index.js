@@ -11,6 +11,52 @@ if (!supabaseUrl || !supabaseKey) {
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+// ---------- Analysis helpers (serverless / mock) ----------
+const buildMockTimeline = (effectiveDurationSeconds, stepSeconds = 10) => {
+  const timeline = [];
+  const total = Math.max(0, Number(effectiveDurationSeconds) || 0);
+  for (let t = 0; t <= total; t += stepSeconds) {
+    timeline.push({ time: t, laughs: Math.floor(Math.random() * 5) });
+  }
+  return timeline;
+};
+
+const buildMockJokeMetrics = async ({ user, setName }) => {
+  // Use user joke headers as "topics"/headers if available; otherwise fallback.
+  let headers = [];
+  try {
+    if (user) {
+      const { data } = await supabase
+        .from('jokes')
+        .select('header')
+        .eq('user_id', user.id)
+        .order('updated_at', { ascending: false })
+        .limit(12);
+      headers = (data || []).map(r => r.header).filter(Boolean);
+    }
+  } catch (_) {}
+
+  const count = Math.max(4, Math.min(8, headers.length || 6));
+  const jokeMetrics = [];
+  let totalLaughs = 0;
+  for (let i = 0; i < count; i++) {
+    const laughs = Math.floor(Math.random() * 15) + 2;
+    totalLaughs += laughs;
+    jokeMetrics.push({
+      jokeIndex: i,
+      laughs,
+      header: headers[i] || `${setName ? setName + ' - ' : ''}Joke ${i + 1}`,
+    });
+  }
+  return { jokeMetrics, totalLaughs };
+};
+
+const categorize = (lpm, avg) => {
+  if (lpm >= 8 && avg >= 8) return 'good';
+  if (lpm < 4 || avg < 4) return 'bad';
+  return 'average';
+};
+
 // Helper to extract user from JWT
 const extractUser = async (req) => {
   const authHeader = req.headers.authorization;
@@ -254,6 +300,70 @@ export default async function handler(req, res) {
           createdAt: a.created_at
         }));
         return res.json(parsedAnalyses);
+      }
+    }
+
+    // Analyze (serverless / mock).
+    // NOTE: Deployed serverless does not accept large file uploads; the frontend sends JSON in production.
+    if (path === '/analysis/analyze' || path === '/analysis/analyze/') {
+      if (method === 'POST') {
+        const {
+          setId,
+          setName,
+          audioDuration,
+          excludeStartSeconds = 0,
+          excludeEndSeconds = 0,
+          audioFileName = null
+        } = body || {};
+
+        if (!setId) return res.status(400).json({ error: 'setId is required' });
+        if (!setName) return res.status(400).json({ error: 'setName is required' });
+
+        const fullDuration = audioDuration ? Math.max(0, parseInt(audioDuration, 10)) : 300;
+        const excludedStart = Math.max(0, parseInt(excludeStartSeconds, 10) || 0);
+        const excludedEnd = Math.max(0, parseInt(excludeEndSeconds, 10) || 0);
+        const effectiveDuration = Math.max(0, fullDuration - excludedStart - excludedEnd);
+
+        const timeline = buildMockTimeline(effectiveDuration, 10);
+        const { jokeMetrics, totalLaughs } = await buildMockJokeMetrics({ user, setName });
+        const avgLaughsPerJoke = jokeMetrics.length ? totalLaughs / jokeMetrics.length : 0;
+        const laughsPerMinute = effectiveDuration > 0 ? (totalLaughs / effectiveDuration) * 60 : 0;
+        const category = categorize(laughsPerMinute, avgLaughsPerJoke);
+
+        const analysisId = `${Date.now()}`;
+        const analysisDoc = {
+          id: analysisId,
+          set_id: setId,
+          set_name: setName,
+          audio_file_name: audioFileName,
+          laughs_per_minute: Number(laughsPerMinute.toFixed(2)),
+          avg_laughs_per_joke: Number(avgLaughsPerJoke.toFixed(2)),
+          category,
+          timeline,
+          joke_metrics: jokeMetrics,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          user_id: user?.id || null
+        };
+
+        const { error } = await supabase.from('analysis_results').insert([analysisDoc]);
+        if (error) throw error;
+
+        return res.json({
+          id: analysisId,
+          setName,
+          laughsPerMinute: analysisDoc.laughs_per_minute,
+          avgLaughsPerJoke: analysisDoc.avg_laughs_per_joke,
+          category,
+          timeline,
+          jokeMetrics,
+          maxLaughs: Math.max(...jokeMetrics.map(m => m.laughs), 1),
+          excludedStart,
+          excludedEnd,
+          effectiveDuration,
+          fullDuration,
+          isMockData: true
+        });
       }
     }
 
