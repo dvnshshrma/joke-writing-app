@@ -7,11 +7,18 @@ const getApiBaseUrl = () => {
   }
   
   const hostname = window.location.hostname;
+  const port = window.location.port;
   if (hostname === 'localhost' || hostname === '127.0.0.1') {
     return 'http://localhost:3001/api';
   }
-  
-  return `http://${hostname}:3001/api`;
+
+  // If running Vite dev server on a LAN IP (phone testing), backend is typically on :3001
+  if (port && port !== '80' && port !== '443') {
+    return `http://${hostname}:3001/api`;
+  }
+
+  // Production (Vercel): backend is served from the same origin under /api
+  return `${window.location.origin}/api`;
 };
 
 const API_BASE_URL = getApiBaseUrl();
