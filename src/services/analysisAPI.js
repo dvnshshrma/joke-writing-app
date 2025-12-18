@@ -18,7 +18,25 @@ const getApiBaseUrl = () => {
 };
 
 const API_BASE_URL = getApiBaseUrl();
-const SAME_ORIGIN_API_BASE_URL = typeof window !== 'undefined' ? `${window.location.origin}/api` : null;
+
+const normalizeApiBaseUrl = (raw) => {
+  if (!raw) return null;
+  try {
+    const u = new URL(raw, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+    // normalize trailing slashes
+    const pathname = u.pathname.replace(/\/+$/, '');
+    return `${u.origin}${pathname}`;
+  } catch {
+    return String(raw).replace(/\/+$/, '');
+  }
+};
+
+const SAME_ORIGIN_API_BASE_URL =
+  typeof window !== 'undefined' ? normalizeApiBaseUrl(`${window.location.origin}/api`) : null;
+
+const IS_SAME_ORIGIN_SERVERLESS =
+  typeof window !== 'undefined' &&
+  normalizeApiBaseUrl(API_BASE_URL) === SAME_ORIGIN_API_BASE_URL;
 
 const getAuthHeaders = async (isFormData = false) => {
   const headers = {};
@@ -39,10 +57,9 @@ export const analysisAPI = {
     try {
       // Vercel serverless handler (`/api/index.js`) cannot reliably parse multipart FormData.
       // When we are in same-origin production, send JSON instead (still uses mock analysis on serverless).
-      const isSameOriginServerless = SAME_ORIGIN_API_BASE_URL && API_BASE_URL === SAME_ORIGIN_API_BASE_URL;
 
       let response;
-      if (isSameOriginServerless && formData instanceof FormData) {
+      if (IS_SAME_ORIGIN_SERVERLESS && formData instanceof FormData) {
         const setName = (formData.get('setName') || '').toString();
         const audioDuration = formData.get('audioDuration') ? Number(formData.get('audioDuration')) : null;
         const excludeStartSeconds = formData.get('excludeStartSeconds') ? Number(formData.get('excludeStartSeconds')) : 0;
