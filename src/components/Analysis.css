@@ -42,6 +42,12 @@
   padding: 3rem;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
   min-height: 400px;
+  max-width: 100%;
+  overflow: hidden; /* prevent charts/panels from spilling outside */
+}
+
+.analysis-content * {
+  box-sizing: border-box;
 }
 
 .analysis-upload-section {
@@ -425,6 +431,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 1rem;
+  max-width: 100%;
 }
 
 .summary-card {
@@ -432,6 +439,7 @@
   border-radius: 12px;
   padding: 1.5rem;
   text-align: center;
+  min-width: 0;
 }
 
 .summary-card h3 {
@@ -446,6 +454,7 @@
   margin: 0;
   color: #333;
   font-size: 1.1rem;
+  overflow-wrap: anywhere;
 }
 
 .metric-value {
@@ -482,6 +491,8 @@
   background: #f9f9f9;
   border-radius: 12px;
   padding: 2rem;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .timeline-section h3 {
@@ -495,6 +506,8 @@
   border-radius: 8px;
   padding: 1rem;
   border: 2px solid #e0e0e0;
+  max-width: 100%;
+  overflow: hidden; /* the internal chart container handles scrolling */
 }
 
 .timeline-chart {
@@ -566,6 +579,8 @@
   width: 100%;
   height: 300px;
   overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
 }
 
 .chart-container.enhanced {
@@ -580,6 +595,31 @@
   width: 100%;
   height: 100%;
   min-width: 600px;
+}
+
+.stat-value {
+  overflow-wrap: anywhere;
+}
+
+.joke-metric-header {
+  gap: 0.75rem;
+}
+
+.laugh-count {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.insight-card,
+.history-item,
+.analysis-tab {
+  min-width: 0;
+}
+
+.insight-content,
+.history-info,
+.analysis-tab-header h4 {
+  overflow-wrap: anywhere;
 }
 
 .chart-legend {
@@ -790,6 +830,15 @@
 }
 
 @media (max-width: 768px) {
+  .analysis-content {
+    padding: 1.5rem;
+  }
+
+  .timeline-section,
+  .joke-metrics-section {
+    padding: 1.25rem;
+  }
+
   .chart-stats-bar {
     flex-direction: column;
     gap: 0.5rem;
@@ -811,6 +860,15 @@
 
   .legend-item {
     font-size: 0.75rem;
+  }
+
+  /* Keep charts readable without overflowing the card */
+  .chart-container {
+    height: 260px;
+  }
+
+  .chart-svg {
+    min-width: 480px; /* allow internal horizontal scroll, but keep inside container */
   }
 }
 
