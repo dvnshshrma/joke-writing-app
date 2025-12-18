@@ -21,6 +21,7 @@ function Analysis() {
   const [mediaType, setMediaType] = useState(null) // 'audio' or 'video'
   const [isConverting, setIsConverting] = useState(false) // For video to audio conversion
   const [conversionMessage, setConversionMessage] = useState(null)
+  const [convertVideoToAudio, setConvertVideoToAudio] = useState(true) // user-controlled (recommended)
 
   useEffect(() => {
     loadRecentAnalyses()
@@ -91,16 +92,17 @@ function Analysis() {
       const isVideo = file.type.startsWith('video/')
       const fileSizeMB = file.size / (1024 * 1024)
       const MAX_SIZE_MB = 1024 // 1GB
-      const VIDEO_CONVERT_THRESHOLD_MB = 50 // convert most videos to audio to keep uploads small/reliable
+      // NOTE: We allow analyzing the original video <1GB when the user opts in.
       
       if (isAudio || isVideo) {
-        // Convert videos to audio (recommended). This keeps uploads small and avoids large-file failures.
-        // - Always convert if > threshold
-        // - Also convert if > 1GB (hard limit messaging)
-        if (isVideo && (fileSizeMB > VIDEO_CONVERT_THRESHOLD_MB || fileSizeMB > MAX_SIZE_MB)) {
+        // Convert videos to audio when:
+        // - video is over the hard 1GB limit (must)
+        // - user has enabled conversion (recommended)
+        const shouldConvert = isVideo && (fileSizeMB > MAX_SIZE_MB || convertVideoToAudio)
+        if (shouldConvert) {
           const reason = fileSizeMB > MAX_SIZE_MB
             ? `over 1GB limit`
-            : `large video file`
+            : `conversion is enabled`
           setConversionMessage(`Video is ${fileSizeMB.toFixed(0)}MB (${reason}). Converting to audio for analysis...`)
           setIsConverting(true)
           
@@ -129,7 +131,11 @@ function Analysis() {
         setAudioFile(file)
         setMediaFile(file)
         setMediaType(isAudio ? 'audio' : 'video')
-        setConversionMessage(null)
+        if (isVideo && fileSizeMB > 200) {
+          setConversionMessage('ℹ️ Large videos can fail to upload on some deployments. If analysis fails, enable “Convert video to audio”.')
+        } else {
+          setConversionMessage(null)
+        }
         
         try {
           const duration = await getMediaDuration(file, isVideo)
@@ -451,6 +457,19 @@ function Analysis() {
 
             <div className="audio-upload-section">
               <h2>2. Upload Audio or Video</h2>
+              <div className="video-options">
+                <label className="video-option">
+                  <input
+                    type="checkbox"
+                    checked={convertVideoToAudio}
+                    onChange={(e) => setConvertVideoToAudio(e.target.checked)}
+                  />
+                  <span><strong>Convert video to audio (recommended)</strong></span>
+                </label>
+                <p className="video-option-hint">
+                  Turning this off will attempt to analyze the original video file (works best for smaller videos). Videos over 1GB will still be converted.
+                </p>
+              </div>
               <div className="upload-area">
                 <input
                   type="file"

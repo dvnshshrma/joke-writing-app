@@ -222,6 +222,35 @@
   color: #999;
 }
 
+.video-options {
+  margin: 0.25rem 0 0;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(102, 126, 234, 0.25);
+  background: rgba(102, 126, 234, 0.06);
+  border-radius: 12px;
+}
+
+.video-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.95rem;
+  color: #111827;
+  user-select: none;
+}
+
+.video-option input {
+  width: 18px;
+  height: 18px;
+}
+
+.video-option-hint {
+  margin: 0.6rem 0 0;
+  color: #6b7280;
+  font-size: 0.88rem;
+  line-height: 1.25rem;
+}
+
 .file-selected {
   display: flex;
   align-items: center;
