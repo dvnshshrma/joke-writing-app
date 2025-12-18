@@ -91,11 +91,17 @@ function Analysis() {
       const isVideo = file.type.startsWith('video/')
       const fileSizeMB = file.size / (1024 * 1024)
       const MAX_SIZE_MB = 1024 // 1GB
+      const VIDEO_CONVERT_THRESHOLD_MB = 50 // convert most videos to audio to keep uploads small/reliable
       
       if (isAudio || isVideo) {
-        // Check if video is too large and needs conversion
-        if (isVideo && fileSizeMB > MAX_SIZE_MB) {
-          setConversionMessage(`Video is ${fileSizeMB.toFixed(0)}MB (over 1GB limit). Converting to audio...`)
+        // Convert videos to audio (recommended). This keeps uploads small and avoids large-file failures.
+        // - Always convert if > threshold
+        // - Also convert if > 1GB (hard limit messaging)
+        if (isVideo && (fileSizeMB > VIDEO_CONVERT_THRESHOLD_MB || fileSizeMB > MAX_SIZE_MB)) {
+          const reason = fileSizeMB > MAX_SIZE_MB
+            ? `over 1GB limit`
+            : `large video file`
+          setConversionMessage(`Video is ${fileSizeMB.toFixed(0)}MB (${reason}). Converting to audio for analysis...`)
           setIsConverting(true)
           
           try {
@@ -143,7 +149,8 @@ function Analysis() {
     return new Promise((resolve, reject) => {
       const video = document.createElement('video')
       video.src = URL.createObjectURL(videoFile)
-      video.muted = false
+      // Keep muted to avoid feedback / autoplay blocks; we only need the audio track for recording.
+      video.muted = true
       
       video.onloadedmetadata = async () => {
         try {
@@ -152,11 +159,13 @@ function Analysis() {
           const source = audioContext.createMediaElementSource(video)
           const destination = audioContext.createMediaStreamDestination()
           source.connect(destination)
-          source.connect(audioContext.destination)
+          // Do NOT connect to speakers; just record.
           
           // Set up MediaRecorder for audio
-          const mediaRecorder = new MediaRecorder(destination.stream, { 
-            mimeType: 'audio/webm;codecs=opus' 
+          const mediaRecorder = new MediaRecorder(destination.stream, {
+            mimeType: 'audio/webm;codecs=opus',
+            // Keep bitrate low so even large videos become small audio files (best-effort, browser may ignore)
+            audioBitsPerSecond: 24000
           })
           const chunks = []
           
