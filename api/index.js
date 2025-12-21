@@ -109,26 +109,137 @@ const computeLaughTimelineFromWords = (words = [], effectiveDurationSeconds = 0,
   return buckets.map((laughs, i) => ({ time: i * stepSeconds, laughs }));
 };
 
-const buildJokeMetricsFromTranscript = async ({ user, transcriptText }) => {
-  // Map jokes to user headers using a simple keyword overlap.
-  let headers = [];
+// Improved topic extraction using keyword frequency and phrase analysis
+const extractTopicsFromTranscript = (transcriptText) => {
+  if (!transcriptText || !transcriptText.trim()) return [];
+
+  // Common stop words to filter out
+  const stopWords = new Set([
+    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from',
+    'as', 'is', 'was', 'are', 'were', 'been', 'be', 'have', 'has', 'had', 'do', 'does', 'did',
+    'will', 'would', 'should', 'could', 'may', 'might', 'must', 'can', 'this', 'that', 'these', 'those',
+    'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them',
+    'what', 'which', 'who', 'whom', 'whose', 'where', 'when', 'why', 'how',
+    'if', 'then', 'else', 'so', 'than', 'just', 'only', 'even', 'also', 'still', 'yet', 'already',
+    'very', 'really', 'quite', 'pretty', 'too', 'more', 'most', 'less', 'least', 'well', 'good', 'bad',
+    'all', 'both', 'each', 'every', 'some', 'any', 'no', 'not', 'yes', 'yeah', 'ok', 'okay',
+    'got', 'get', 'gets', 'getting', 'go', 'goes', 'going', 'went', 'gone', 'come', 'comes', 'coming', 'came',
+    'know', 'knows', 'knew', 'think', 'thinks', 'thought', 'see', 'sees', 'saw', 'say', 'says', 'said', 'tell', 'tells', 'told',
+    'like', 'likes', 'liked', 'want', 'wants', 'wanted', 'need', 'needs', 'needed', 'try', 'tries', 'tried',
+    'uh', 'um', 'ah', 'oh', 'hmm', 'haha', 'lol', 'like', 'literally', 'actually', 'basically', 'obviously'
+  ]);
+
+  // Normalize and split text into sentences (simple approach)
+  const sentences = transcriptText
+    .toLowerCase()
+    .replace(/[.,!?;:—–\-]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 2 && !stopWords.has(w));
+
+  // Count word frequencies
+  const wordFreq = {};
+  sentences.forEach(word => {
+    wordFreq[word] = (wordFreq[word] || 0) + 1;
+  });
+
+  // Extract 2-3 word phrases (n-grams) for better topic detection
+  const phrases = [];
+  const words = transcriptText.toLowerCase().split(/\s+/);
+  for (let i = 0; i < words.length - 1; i++) {
+    const w1 = words[i].replace(/[.,!?;:—–\-]/g, '');
+    const w2 = words[i + 1].replace(/[.,!?;:—–\-]/g, '');
+    if (w1.length > 2 && w2.length > 2 && !stopWords.has(w1) && !stopWords.has(w2)) {
+      phrases.push(`${w1} ${w2}`);
+    }
+  }
+  for (let i = 0; i < words.length - 2; i++) {
+    const w1 = words[i].replace(/[.,!?;:—–\-]/g, '');
+    const w2 = words[i + 1].replace(/[.,!?;:—–\-]/g, '');
+    const w3 = words[i + 2].replace(/[.,!?;:—–\-]/g, '');
+    if (w1.length > 2 && w2.length > 2 && w3.length > 2 && 
+        !stopWords.has(w1) && !stopWords.has(w2) && !stopWords.has(w3)) {
+      phrases.push(`${w1} ${w2} ${w3}`);
+    }
+  }
+
+  // Count phrase frequencies
+  const phraseFreq = {};
+  phrases.forEach(phrase => {
+    phraseFreq[phrase] = (phraseFreq[phrase] || 0) + 1;
+  });
+
+  // Combine high-frequency words and phrases, prioritize longer phrases
+  const candidates = [];
+  Object.entries(phraseFreq).forEach(([phrase, count]) => {
+    if (count >= 2) { // Phrase appears at least twice
+      candidates.push({ text: phrase, score: count * (phrase.split(' ').length * 0.5) });
+    }
+  });
+  Object.entries(wordFreq).forEach(([word, count]) => {
+    if (count >= 3 && word.length >= 4) { // Word appears at least 3 times, 4+ chars
+      candidates.push({ text: word, score: count });
+    }
+  });
+
+  // Sort by score and return top topics
+  candidates.sort((a, b) => b.score - a.score);
+  
+  // Capitalize first letter of each word for display
+  return candidates.slice(0, 8).map(item => ({
+    topic: item.text.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+    score: item.score
+  }));
+};
+
+const buildJokeMetricsFromTranscript = async ({ user, transcriptText, jobChapters = null }) => {
+  // Use AssemblyAI chapters if available (best option)
+  if (jobChapters && Array.isArray(jobChapters) && jobChapters.length > 0) {
+    return jobChapters.map((chapter, i) => ({
+      jokeIndex: i,
+      header: chapter.headline || chapter.summary?.substring(0, 50) || `Topic ${i + 1}`,
+      laughs: 0,
+      startTime: chapter.start,
+      endTime: chapter.end,
+      summary: chapter.summary
+    }));
+  }
+
+  // Extract topics from transcript using keyword/phrase analysis
+  const topics = extractTopicsFromTranscript(transcriptText || '');
+  
+  // Also try to match against user's saved joke headers for better alignment
+  let savedHeaders = [];
   try {
-    if (user) {
-      const { data } = await supabase
+    if (user && supabaseAdmin) {
+      const { data } = await supabaseAdmin
         .from('jokes')
         .select('header')
         .eq('user_id', user.id)
         .order('updated_at', { ascending: false })
         .limit(30);
-      headers = (data || []).map(r => r.header).filter(Boolean);
+      savedHeaders = (data || []).map(r => r.header).filter(Boolean);
     }
   } catch (_) {}
 
-  const fallbackCount = 6;
-  const baseHeaders = headers.length ? headers.slice(0, Math.max(4, Math.min(12, headers.length))) : Array.from({ length: fallbackCount }, (_, i) => `Joke ${i + 1}`);
+  // Determine number of jokes/topics (minimum 4 for a 7-minute set, max based on duration)
+  const estimatedMinutes = (transcriptText || '').split(/\s+/).length / 150; // ~150 words per minute
+  const minJokes = 4;
+  const maxJokes = Math.max(minJokes, Math.min(12, Math.ceil(estimatedMinutes) + 1));
+  const numJokes = Math.max(minJokes, Math.min(maxJokes, Math.max(topics.length, savedHeaders.length || 6)));
 
-  // No real per-joke laugh mapping without detailed laughter detection; distribute laughs proportionally by segment length.
-  return baseHeaders.map((h, i) => ({ jokeIndex: i, header: h, laughs: 0 }));
+  // Build headers: prefer topics from transcript, fallback to saved headers, then generic
+  const headers = [];
+  for (let i = 0; i < numJokes; i++) {
+    if (topics[i]) {
+      headers.push(topics[i].topic);
+    } else if (savedHeaders[i]) {
+      headers.push(savedHeaders[i]);
+    } else {
+      headers.push(`Joke ${i + 1}`);
+    }
+  }
+
+  return headers.map((h, i) => ({ jokeIndex: i, header: h, laughs: 0 }));
 };
 
 // Helper to extract user from JWT
@@ -538,7 +649,12 @@ export default async function handler(req, res) {
         const totalLaughs = timeline.reduce((s, p) => s + (p.laughs || 0), 0);
   const laughsPerMinute = effectiveDuration > 0 ? (totalLaughs / effectiveDuration) * 60 : 0;
   
-        let jokeMetrics = await buildJokeMetricsFromTranscript({ user, transcriptText: job.text || '' });
+        // Use AssemblyAI chapters if available, otherwise extract topics from transcript
+        let jokeMetrics = await buildJokeMetricsFromTranscript({ 
+          user, 
+          transcriptText: job.text || '',
+          jobChapters: job.chapters || null
+        });
         // Distribute laughs evenly across jokes for display (until we do true laughter-to-joke alignment)
         if (jokeMetrics.length) {
           const per = Math.floor(totalLaughs / jokeMetrics.length);

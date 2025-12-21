@@ -440,6 +440,8 @@
   padding: 1.5rem;
   text-align: center;
   min-width: 0;
+  overflow: hidden;
+  word-wrap: break-word;
 }
 
 .summary-card h3 {
@@ -448,19 +450,27 @@
   font-size: 0.9rem;
   font-weight: 600;
   text-transform: uppercase;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .summary-card p {
   margin: 0;
   color: #333;
   font-size: 1.1rem;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  max-width: 100%;
 }
 
 .metric-value {
   font-size: 2rem !important;
   font-weight: 700;
   color: #667eea !important;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  max-width: 100%;
+  display: block;
 }
 
 .category-badge {
