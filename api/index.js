@@ -495,7 +495,15 @@ export default async function handler(req, res) {
           category: a.category,
           timeline: a.timeline || [],
           jokeMetrics: a.joke_metrics || [],
-          createdAt: a.created_at
+          createdAt: a.created_at,
+          speakingPace: a.speaking_pace || null,
+          wordCount: a.word_count || null,
+          silenceCount: a.silence_count || null,
+          effectiveDuration: a.effective_duration || null,
+          fullDuration: a.full_duration || null,
+          excludedStart: a.excluded_start || 0,
+          excludedEnd: a.excluded_end || 0,
+          transcriptText: a.transcript_text || null
         }));
         return res.json(parsedAnalyses);
       }
@@ -563,6 +571,11 @@ export default async function handler(req, res) {
         const laughsPerMinute = effectiveDuration > 0 ? (totalLaughs / effectiveDuration) * 60 : 0;
         const category = categorize(laughsPerMinute, avgLaughsPerJoke);
 
+        // Mock advanced analytics (estimated values for demo)
+        const estimatedWordCount = Math.floor(effectiveDuration * 2.5); // ~150 WPM average
+        const mockSpeakingPace = 150;
+        const mockSilenceCount = Math.floor(totalLaughs * 1.2); // Slightly more silence gaps than laughs
+
         const analysisId = `${Date.now()}`;
         const analysisDoc = {
           id: analysisId,
@@ -595,7 +608,10 @@ export default async function handler(req, res) {
           excludedEnd,
           effectiveDuration,
           fullDuration,
-          isMockData: true
+          isMockData: true,
+          speakingPace: mockSpeakingPace,
+          wordCount: estimatedWordCount,
+          silenceCount: mockSilenceCount
         });
       }
     }
@@ -635,7 +651,14 @@ export default async function handler(req, res) {
             timeline: a.timeline || [],
             jokeMetrics: a.joke_metrics || [],
             transcriptText: a.transcript_text || job.text || '',
-            isMockData: false
+            isMockData: false,
+            speakingPace: a.speaking_pace || null,
+            wordCount: a.word_count || null,
+            silenceCount: a.silence_count || null,
+            effectiveDuration: a.effective_duration || null,
+            fullDuration: a.full_duration || null,
+            excludedStart: a.excluded_start || 0,
+            excludedEnd: a.excluded_end || 0
           });
         }
 
@@ -649,10 +672,24 @@ export default async function handler(req, res) {
         const totalLaughs = timeline.reduce((s, p) => s + (p.laughs || 0), 0);
   const laughsPerMinute = effectiveDuration > 0 ? (totalLaughs / effectiveDuration) * 60 : 0;
   
+        // Compute advanced analytics: word count, speaking pace, silence count
+        const transcriptText = job.text || '';
+        const wordCount = transcriptText.trim().split(/\s+/).filter(w => w.length > 0).length;
+        const speakingPace = effectiveDuration > 0 ? Math.round((wordCount / effectiveDuration) * 60) : 0;
+        
+        // Count silence gaps (pauses >= 1200ms) as laugh moments
+        const silenceCount = (job.words || []).reduce((count, word, i) => {
+          if (i > 0) {
+            const gap = (word.start ?? 0) - (job.words[i - 1].end ?? 0);
+            if (gap >= 1200) count++;
+          }
+          return count;
+        }, 0);
+  
         // Use AssemblyAI chapters if available, otherwise extract topics from transcript
         let jokeMetrics = await buildJokeMetricsFromTranscript({ 
           user, 
-          transcriptText: job.text || '',
+          transcriptText,
           jobChapters: job.chapters || null
         });
         // Distribute laughs evenly across jokes for display (until we do true laughter-to-joke alignment)
@@ -680,7 +717,14 @@ export default async function handler(req, res) {
           joke_metrics: jokeMetrics,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-          user_id: user?.id || null
+          user_id: user?.id || null,
+          speaking_pace: speakingPace,
+          word_count: wordCount,
+          silence_count: silenceCount,
+          effective_duration: effectiveDuration,
+          full_duration: fullDuration,
+          excluded_start: excludedStart,
+          excluded_end: excludedEnd
         };
 
         // Try to save transcript text if the column exists; otherwise save without it.
@@ -708,12 +752,15 @@ export default async function handler(req, res) {
           category,
           timeline,
           jokeMetrics,
-          transcriptText: job.text || '',
+          transcriptText,
           isMockData: false,
           excludedStart,
           excludedEnd,
           effectiveDuration,
-          fullDuration
+          fullDuration,
+          speakingPace,
+          wordCount,
+          silenceCount
         });
       }
     }
