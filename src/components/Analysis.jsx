@@ -85,6 +85,19 @@ function Analysis() {
     }
   }
 
+  const handleReAnalyze = (oldAnalysis) => {
+    // Pre-fill the setName with the old analysis's setName
+    setSetName(oldAnalysis.setName || '')
+    // Switch to new analysis tab
+    setActiveTab('new')
+    // Clear any existing analysis result
+    setAnalysisResult(null)
+    // Clear selected analysis
+    setSelectedAnalysis(null)
+    // Scroll to top if needed (optional)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   const handleFileSelect = async (e) => {
     const file = e.target.files[0]
     if (file) {
