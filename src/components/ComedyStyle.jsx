@@ -137,10 +137,17 @@ function ComedyStyle() {
         }
         
         const result = await response.json()
+        console.log('Analysis initiated (production), result:', result)
         
         if (result.status === 'processing' && result.jobId) {
+          console.log('Starting to poll for job:', result.jobId)
           await pollForResults(result.jobId)
+        } else if (result.result) {
+          // Direct result (no polling needed)
+          console.log('Analysis completed immediately (production)')
+          setAnalysisResult(result.result)
         } else {
+          console.log('Analysis completed (legacy format - production)')
           setAnalysisResult(result)
         }
       } else {
