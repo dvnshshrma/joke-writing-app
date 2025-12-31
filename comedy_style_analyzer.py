@@ -8,11 +8,29 @@ import re
 import math
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass, asdict
-import spacy
-import openai
 from collections import Counter
 import os
 from dotenv import load_dotenv
+
+# Try importing Spacy (may fail on Python 3.14+)
+try:
+    import spacy
+    SPACY_AVAILABLE = True
+except (ImportError, Exception) as e:
+    SPACY_AVAILABLE = False
+    spacy = None
+    print("⚠️  Spacy could not be imported (this is OK - script will use basic text processing).")
+    print(f"   Note: {str(e)[:100]}...")
+    print("   💡 For full NLP features, use Python 3.11 or 3.12. See FIX_PYTHON_VERSION.md")
+
+# Try importing OpenAI
+try:
+    import openai
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+    openai = None
+    print("⚠️  OpenAI library not available. Install with: pip install openai")
 
 # Load environment variables from .env file (if exists)
 load_dotenv()
@@ -20,20 +38,27 @@ load_dotenv()
 # Load spacy model (run: python -m spacy download en_core_web_sm)
 # Note: Spacy may not be compatible with Python 3.14+. Use Python 3.8-3.13 for best results.
 nlp = None
-try:
-    nlp = spacy.load("en_core_web_sm")
-except (OSError, ImportError, Exception) as e:
-    print("⚠️  Spacy not available or model not found.")
-    print(f"   Error: {str(e)}")
-    print("   Falling back to basic text processing (syllable counting and keyword matching).")
-    print("   For full NLP features, use Python 3.8-3.13 and install: python -m spacy download en_core_web_sm")
-    nlp = None
+if SPACY_AVAILABLE:
+    try:
+        nlp = spacy.load("en_core_web_sm")
+        print("✅ Spacy model loaded successfully")
+    except (OSError, Exception) as e:
+        print("⚠️  Spacy model not found or couldn't be loaded.")
+        print(f"   Error: {str(e)[:100]}...")
+        print("   Falling back to basic text processing (syllable counting and keyword matching).")
+        print("   To install model: python -m spacy download en_core_web_sm")
+        nlp = None
+else:
+    print("ℹ️  Running in basic mode (no Spacy NLP features)")
 
 # OpenAI API key (set via environment variable or .env file)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-if OPENAI_API_KEY:
+if OPENAI_API_KEY and OPENAI_AVAILABLE:
     openai.api_key = OPENAI_API_KEY
-else:
+elif not OPENAI_AVAILABLE:
+    OPENAI_API_KEY = None  # Can't use OpenAI if library not available
+    print("ℹ️  OpenAI library not installed. Using keyword-based classification.")
+elif not OPENAI_API_KEY:
     print("ℹ️  OpenAI API key not found. Using keyword-based classification instead.")
     print("   Set OPENAI_API_KEY environment variable for more accurate style classification.")
 
