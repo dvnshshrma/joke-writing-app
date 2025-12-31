@@ -109,6 +109,87 @@ const computeLaughTimelineFromWords = (words = [], effectiveDurationSeconds = 0,
   return buckets.map((laughs, i) => ({ time: i * stepSeconds, laughs }));
 };
 
+// Robust calculation of advanced analytics from AssemblyAI transcript
+const computeAdvancedAnalytics = (job, excludedStartSeconds = 0, excludedEndSeconds = 0, audioDurationSeconds = null) => {
+  const words = job.words || [];
+  const transcriptText = job.text || '';
+  const audioDuration = audioDurationSeconds || (job.audio_duration ? Math.ceil(job.audio_duration / 1000) : null);
+  
+  if (!words.length && !transcriptText) {
+    // No data available
+    return {
+      wordCount: null,
+      speakingPace: null,
+      silenceCount: null,
+      effectiveDuration: null
+    };
+  }
+
+  // Calculate effective duration (actual speaking time within analyzed range)
+  const excludedStartMs = excludedStartSeconds * 1000;
+  const excludedEndMs = excludedEndSeconds * 1000;
+  const audioDurationMs = audioDuration ? audioDuration * 1000 : null;
+
+  // Filter words within the analyzed range (excluding start/end applause)
+  const filteredWords = words.filter(word => {
+    const wordStart = word.start ?? 0;
+    const wordEnd = word.end ?? wordStart;
+    if (audioDurationMs !== null) {
+      return wordStart >= excludedStartMs && wordEnd <= (audioDurationMs - excludedEndMs);
+    }
+    return true; // If no audio duration, include all words
+  });
+
+  // Calculate actual speaking duration from word timestamps (more accurate than audio duration)
+  let speakingDurationSeconds = null;
+  if (filteredWords.length > 0) {
+    const firstWord = filteredWords[0];
+    const lastWord = filteredWords[filteredWords.length - 1];
+    const firstStart = firstWord.start ?? 0;
+    const lastEnd = lastWord.end ?? (lastWord.start ?? firstStart);
+    speakingDurationSeconds = Math.max(1, (lastEnd - firstStart) / 1000); // At least 1 second to avoid division by zero
+  } else if (audioDuration) {
+    // Fallback to audio duration minus excluded time
+    speakingDurationSeconds = Math.max(1, audioDuration - excludedStartSeconds - excludedEndSeconds);
+  }
+
+  // Word count: count actual words from transcript, filter out filler words
+  const fillerWords = new Set(['uh', 'um', 'ah', 'oh', 'hmm', 'er', 'like', 'you know', 'i mean', 'well']);
+  const transcriptWords = transcriptText
+    .toLowerCase()
+    .replace(/[.,!?;:—–\-()\[\]{}'"]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 0 && !fillerWords.has(w));
+  const wordCount = transcriptWords.length || filteredWords.length;
+
+  // Speaking pace: words per minute using actual speaking duration
+  let speakingPace = null;
+  if (speakingDurationSeconds && speakingDurationSeconds > 0 && wordCount > 0) {
+    speakingPace = Math.round((wordCount / speakingDurationSeconds) * 60);
+    // Clamp to reasonable range (50-250 WPM typical for speech)
+    speakingPace = Math.max(50, Math.min(250, speakingPace));
+  }
+
+  // Silence count: count significant pauses (>= 1200ms) within analyzed range
+  let silenceCount = 0;
+  if (filteredWords.length > 1) {
+    for (let i = 1; i < filteredWords.length; i++) {
+      const gap = (filteredWords[i].start ?? 0) - (filteredWords[i - 1].end ?? 0);
+      // Pause >= 1200ms (1.2 seconds) is significant
+      if (gap >= 1200) {
+        silenceCount++;
+      }
+    }
+  }
+
+  return {
+    wordCount,
+    speakingPace,
+    silenceCount,
+    effectiveDuration: speakingDurationSeconds ? Math.round(speakingDurationSeconds) : null
+  };
+};
+
 // Improved topic extraction using keyword frequency and phrase analysis
 const extractTopicsFromTranscript = (transcriptText) => {
   if (!transcriptText || !transcriptText.trim()) return [];
@@ -571,10 +652,11 @@ export default async function handler(req, res) {
         const laughsPerMinute = effectiveDuration > 0 ? (totalLaughs / effectiveDuration) * 60 : 0;
         const category = categorize(laughsPerMinute, avgLaughsPerJoke);
 
-        // Mock advanced analytics (estimated values for demo)
+        // Mock advanced analytics (estimated values - clearly marked as estimates)
+        // These are approximations since we don't have actual transcript data
         const estimatedWordCount = Math.floor(effectiveDuration * 2.5); // ~150 WPM average
-        const mockSpeakingPace = 150;
-        const mockSilenceCount = Math.floor(totalLaughs * 1.2); // Slightly more silence gaps than laughs
+        const mockSpeakingPace = 150; // Typical speaking pace
+        const mockSilenceCount = Math.max(0, Math.floor(totalLaughs * 1.2)); // Slightly more silence gaps than laughs
 
         const analysisId = `${Date.now()}`;
         const analysisDoc = {
@@ -667,24 +749,19 @@ export default async function handler(req, res) {
         const excludedEnd = Math.max(0, excludeEndSeconds || 0);
         const effectiveDuration = Math.max(0, fullDuration - excludedStart - excludedEnd);
 
-        // Build timeline from pauses (words with timestamps)
-        const timeline = computeLaughTimelineFromWords(job.words || [], effectiveDuration, 10);
-        const totalLaughs = timeline.reduce((s, p) => s + (p.laughs || 0), 0);
-  const laughsPerMinute = effectiveDuration > 0 ? (totalLaughs / effectiveDuration) * 60 : 0;
-  
-        // Compute advanced analytics: word count, speaking pace, silence count
-        const transcriptText = job.text || '';
-        const wordCount = transcriptText.trim().split(/\s+/).filter(w => w.length > 0).length;
-        const speakingPace = effectiveDuration > 0 ? Math.round((wordCount / effectiveDuration) * 60) : 0;
+        // Compute advanced analytics using robust calculation from word timestamps
+        const advancedAnalytics = computeAdvancedAnalytics(job, excludedStart, excludedEnd, audioDuration);
+        const { wordCount, speakingPace, silenceCount } = advancedAnalytics;
         
-        // Count silence gaps (pauses >= 1200ms) as laugh moments
-        const silenceCount = (job.words || []).reduce((count, word, i) => {
-          if (i > 0) {
-            const gap = (word.start ?? 0) - (job.words[i - 1].end ?? 0);
-            if (gap >= 1200) count++;
-          }
-          return count;
-        }, 0);
+        // Use effective duration from advanced analytics if available, otherwise fall back
+        const calculatedEffectiveDuration = advancedAnalytics.effectiveDuration || effectiveDuration;
+        
+        // Build timeline from pauses (words with timestamps) using calculated duration
+        const timeline = computeLaughTimelineFromWords(job.words || [], calculatedEffectiveDuration, 10);
+        const totalLaughs = timeline.reduce((s, p) => s + (p.laughs || 0), 0);
+        const laughsPerMinute = calculatedEffectiveDuration > 0 ? (totalLaughs / calculatedEffectiveDuration) * 60 : 0;
+        
+        const transcriptText = job.text || '';
   
         // Use AssemblyAI chapters if available, otherwise extract topics from transcript
         let jokeMetrics = await buildJokeMetricsFromTranscript({ 
@@ -721,7 +798,7 @@ export default async function handler(req, res) {
           speaking_pace: speakingPace,
           word_count: wordCount,
           silence_count: silenceCount,
-          effective_duration: effectiveDuration,
+          effective_duration: calculatedEffectiveDuration,
           full_duration: fullDuration,
           excluded_start: excludedStart,
           excluded_end: excludedEnd
@@ -756,7 +833,7 @@ export default async function handler(req, res) {
           isMockData: false,
           excludedStart,
           excludedEnd,
-          effectiveDuration,
+          effectiveDuration: calculatedEffectiveDuration,
           fullDuration,
           speakingPace,
           wordCount,
