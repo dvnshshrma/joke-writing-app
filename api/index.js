@@ -190,6 +190,226 @@ const computeAdvancedAnalytics = (job, excludedStartSeconds = 0, excludedEndSeco
   };
 };
 
+// Extract full text from a joke (header + all sections)
+const extractJokeText = (joke) => {
+  const parts = [joke.header || ''];
+  if (joke.sections && Array.isArray(joke.sections)) {
+    joke.sections.forEach(section => {
+      if (section.text) parts.push(section.text);
+    });
+  }
+  return parts.join(' ').toLowerCase().trim();
+};
+
+// Build keyword vectors from text (simple bag-of-words with TF-like weighting)
+const buildTextVector = (text, stopWords) => {
+  const words = text
+    .toLowerCase()
+    .replace(/[.,!?;:—–\-()\[\]{}'"]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 2 && !stopWords.has(w));
+  
+  const vector = {};
+  words.forEach(word => {
+    vector[word] = (vector[word] || 0) + 1;
+  });
+  
+  // Normalize by length (TF-like)
+  const totalWords = words.length;
+  if (totalWords > 0) {
+    Object.keys(vector).forEach(word => {
+      vector[word] = vector[word] / totalWords;
+    });
+  }
+  
+  return vector;
+};
+
+// Calculate cosine similarity between two text vectors
+const cosineSimilarity = (vec1, vec2) => {
+  const keys = new Set([...Object.keys(vec1), ...Object.keys(vec2)]);
+  let dotProduct = 0;
+  let norm1 = 0;
+  let norm2 = 0;
+  
+  keys.forEach(key => {
+    const v1 = vec1[key] || 0;
+    const v2 = vec2[key] || 0;
+    dotProduct += v1 * v2;
+    norm1 += v1 * v1;
+    norm2 += v2 * v2;
+  });
+  
+  const denominator = Math.sqrt(norm1) * Math.sqrt(norm2);
+  return denominator > 0 ? dotProduct / denominator : 0;
+};
+
+// Segment transcript into joke candidates using pauses, chapters, or fixed intervals
+const segmentTranscriptIntoJokes = (words = [], transcriptText = '', chapters = null, minJokes = 4, estimatedMinutes = 7) => {
+  const segments = [];
+  
+  // Option 1: Use AssemblyAI chapters if available (best option)
+  if (chapters && Array.isArray(chapters) && chapters.length >= minJokes) {
+    return chapters.map((chapter, i) => ({
+      index: i,
+      startTime: chapter.start ? chapter.start / 1000 : null,
+      endTime: chapter.end ? chapter.end / 1000 : null,
+      text: chapter.summary || '',
+      headline: chapter.headline || null
+    }));
+  }
+  
+  // Option 2: Use word timestamps to find natural breaks (long pauses)
+  if (words.length > 0) {
+    const pauseThresholdMs = 1500; // 1.5 second pause indicates joke break
+    const breaks = [0]; // Start of first joke
+    
+    for (let i = 1; i < words.length; i++) {
+      const gap = (words[i].start ?? 0) - (words[i - 1].end ?? 0);
+      if (gap >= pauseThresholdMs) {
+        breaks.push(i);
+      }
+    }
+    breaks.push(words.length); // End of last joke
+    
+    // Ensure minimum number of jokes
+    const targetJokes = Math.max(minJokes, Math.min(12, Math.ceil(estimatedMinutes) + 1));
+    
+    if (breaks.length - 1 >= minJokes) {
+      // Use natural breaks
+      for (let i = 0; i < breaks.length - 1; i++) {
+        const startIdx = breaks[i];
+        const endIdx = breaks[i + 1];
+        const segmentWords = words.slice(startIdx, endIdx);
+        const startTime = segmentWords[0]?.start ? segmentWords[0].start / 1000 : null;
+        const endTime = segmentWords[segmentWords.length - 1]?.end ? segmentWords[segmentWords.length - 1].end / 1000 : null;
+        const text = segmentWords.map(w => w.text || w.word || '').join(' ');
+        
+        segments.push({
+          index: i,
+          startTime,
+          endTime,
+          text: text.trim()
+        });
+      }
+    } else {
+      // Not enough natural breaks, split evenly
+      const wordsPerSegment = Math.floor(words.length / targetJokes);
+      for (let i = 0; i < targetJokes; i++) {
+        const startIdx = i * wordsPerSegment;
+        const endIdx = i === targetJokes - 1 ? words.length : (i + 1) * wordsPerSegment;
+        const segmentWords = words.slice(startIdx, endIdx);
+        const startTime = segmentWords[0]?.start ? segmentWords[0].start / 1000 : null;
+        const endTime = segmentWords[segmentWords.length - 1]?.end ? segmentWords[segmentWords.length - 1].end / 1000 : null;
+        const text = segmentWords.map(w => w.text || w.word || '').join(' ');
+        
+        segments.push({
+          index: i,
+          startTime,
+          endTime,
+          text: text.trim()
+        });
+      }
+    }
+    
+    return segments;
+  }
+  
+  // Option 3: Fallback - split transcript text by sentences/length
+  if (transcriptText) {
+    const sentences = transcriptText.split(/[.!?]\s+/).filter(s => s.trim().length > 20);
+    const wordsPerJoke = Math.max(30, Math.floor(sentences.length / Math.max(minJokes, Math.ceil(estimatedMinutes))));
+    const targetJokes = Math.max(minJokes, Math.min(12, Math.ceil(estimatedMinutes) + 1));
+    
+    for (let i = 0; i < targetJokes; i++) {
+      const startIdx = i * wordsPerJoke;
+      const endIdx = i === targetJokes - 1 ? sentences.length : (i + 1) * wordsPerJoke;
+      const segmentText = sentences.slice(startIdx, endIdx).join('. ').trim();
+      
+      if (segmentText) {
+        segments.push({
+          index: i,
+          startTime: null,
+          endTime: null,
+          text: segmentText
+        });
+      }
+    }
+  }
+  
+  return segments;
+};
+
+// Match transcript segments to user's saved jokes using similarity
+const matchSegmentsToJokes = (segments, savedJokes, stopWords) => {
+  if (!savedJokes || savedJokes.length === 0) return segments.map(s => ({ ...s, matchedHeader: null, similarity: 0 }));
+  
+  // Build vectors for all saved jokes
+  const jokeVectors = savedJokes.map(joke => ({
+    id: joke.id,
+    header: joke.header || 'Untitled',
+    vector: buildTextVector(extractJokeText(joke), stopWords),
+    text: extractJokeText(joke)
+  }));
+  
+  // Match each segment to the most similar joke
+  return segments.map(segment => {
+    const segmentVector = buildTextVector(segment.text || '', stopWords);
+    let bestMatch = null;
+    let bestSimilarity = 0;
+    
+    jokeVectors.forEach(jokeVec => {
+      const similarity = cosineSimilarity(segmentVector, jokeVec.vector);
+      if (similarity > bestSimilarity) {
+        bestSimilarity = similarity;
+        bestMatch = jokeVec;
+      }
+    });
+    
+    // Only use match if similarity is above threshold (0.15 = 15% overlap)
+    if (bestSimilarity >= 0.15) {
+      return {
+        ...segment,
+        matchedHeader: bestMatch.header,
+        similarity: bestSimilarity,
+        matchedJokeId: bestMatch.id
+      };
+    } else {
+      // No good match, extract topic from segment text
+      return {
+        ...segment,
+        matchedHeader: null,
+        similarity: bestSimilarity,
+        extractedTopic: extractSegmentTopic(segment.text || '', stopWords)
+      };
+    }
+  });
+};
+
+// Extract a topic/title from a text segment
+const extractSegmentTopic = (text, stopWords) => {
+  if (!text || text.trim().length < 10) return null;
+  
+  // Try to extract first meaningful sentence or phrase
+  const sentences = text.split(/[.!?]\s+/).filter(s => s.trim().length > 10);
+  if (sentences.length > 0) {
+    const firstSentence = sentences[0].trim();
+    // Take first 4-6 words as topic
+    const words = firstSentence.split(/\s+/).filter(w => !stopWords.has(w.toLowerCase()) && w.length > 2);
+    if (words.length >= 3) {
+      return words.slice(0, Math.min(6, words.length)).join(' ').replace(/[.,!?;:—–\-]/g, '').trim();
+    }
+  }
+  
+  // Fallback: extract key phrases
+  const words = text.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !stopWords.has(w));
+  if (words.length >= 2) {
+    return words.slice(0, Math.min(4, words.length)).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  }
+  
+  return null;
+};
+
 // Improved topic extraction using keyword frequency and phrase analysis
 const extractTopicsFromTranscript = (transcriptText) => {
   if (!transcriptText || !transcriptText.trim()) return [];
@@ -763,11 +983,16 @@ export default async function handler(req, res) {
         
         const transcriptText = job.text || '';
   
-        // Use AssemblyAI chapters if available, otherwise extract topics from transcript
+        // Estimate duration in minutes for joke segmentation
+        const estimatedMinutes = calculatedEffectiveDuration ? Math.ceil(calculatedEffectiveDuration / 60) : 7;
+        
+        // Use improved topic modeling with joke matching and better segmentation
         let jokeMetrics = await buildJokeMetricsFromTranscript({ 
           user, 
           transcriptText,
-          jobChapters: job.chapters || null
+          jobWords: job.words || [],
+          jobChapters: job.chapters || null,
+          estimatedMinutes
         });
         // Distribute laughs evenly across jokes for display (until we do true laughter-to-joke alignment)
         if (jokeMetrics.length) {
