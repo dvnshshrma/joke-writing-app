@@ -738,7 +738,13 @@ function Analysis() {
                   <span className="insight-icon">🎤</span>
                   <div className="insight-content">
                     <h4>Speaking Pace</h4>
-                    <p className="insight-value">{analysisResult.speakingPace || '~150'} WPM</p>
+                    <p className="insight-value">
+                      {analysisResult.speakingPace !== null && analysisResult.speakingPace !== undefined 
+                        ? `${analysisResult.speakingPace} WPM`
+                        : analysisResult.isMockData 
+                          ? '~150 WPM (est.)' 
+                          : '-'}
+                    </p>
                     <p className="insight-label">words per minute</p>
                   </div>
                 </div>
@@ -746,7 +752,13 @@ function Analysis() {
                   <span className="insight-icon">📝</span>
                   <div className="insight-content">
                     <h4>Word Count</h4>
-                    <p className="insight-value">{analysisResult.wordCount || '-'}</p>
+                    <p className="insight-value">
+                      {analysisResult.wordCount !== null && analysisResult.wordCount !== undefined
+                        ? analysisResult.wordCount.toLocaleString()
+                        : analysisResult.isMockData
+                          ? '~' + (analysisResult.effectiveDuration ? Math.floor(analysisResult.effectiveDuration * 2.5).toLocaleString() : '')
+                          : '-'}
+                    </p>
                     <p className="insight-label">total words spoken</p>
                   </div>
                 </div>
@@ -754,7 +766,13 @@ function Analysis() {
                   <span className="insight-icon">😂</span>
                   <div className="insight-content">
                     <h4>Laugh Moments</h4>
-                    <p className="insight-value">{analysisResult.silenceCount || '-'}</p>
+                    <p className="insight-value">
+                      {analysisResult.silenceCount !== null && analysisResult.silenceCount !== undefined
+                        ? analysisResult.silenceCount
+                        : analysisResult.isMockData
+                          ? '~' + (Math.floor((analysisResult.timeline?.reduce((s, p) => s + (p.laughs || 0), 0) || 0) * 1.2))
+                          : '-'}
+                    </p>
                     <p className="insight-label">detected pauses for laughs</p>
                   </div>
                 </div>
