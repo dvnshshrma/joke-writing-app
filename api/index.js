@@ -492,55 +492,77 @@ const extractTopicsFromTranscript = (transcriptText) => {
   }));
 };
 
-const buildJokeMetricsFromTranscript = async ({ user, transcriptText, jobChapters = null }) => {
-  // Use AssemblyAI chapters if available (best option)
-  if (jobChapters && Array.isArray(jobChapters) && jobChapters.length > 0) {
-    return jobChapters.map((chapter, i) => ({
-      jokeIndex: i,
-      header: chapter.headline || chapter.summary?.substring(0, 50) || `Topic ${i + 1}`,
-      laughs: 0,
-      startTime: chapter.start,
-      endTime: chapter.end,
-      summary: chapter.summary
-    }));
-  }
+const buildJokeMetricsFromTranscript = async ({ user, transcriptText, jobWords = [], jobChapters = null, estimatedMinutes = 7 }) => {
+  // Stop words for text processing
+  const stopWords = new Set([
+    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from',
+    'as', 'is', 'was', 'are', 'were', 'been', 'be', 'have', 'has', 'had', 'do', 'does', 'did',
+    'will', 'would', 'should', 'could', 'may', 'might', 'must', 'can', 'this', 'that', 'these', 'those',
+    'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them',
+    'what', 'which', 'who', 'whom', 'whose', 'where', 'when', 'why', 'how',
+    'if', 'then', 'else', 'so', 'than', 'just', 'only', 'even', 'also', 'still', 'yet', 'already',
+    'very', 'really', 'quite', 'pretty', 'too', 'more', 'most', 'less', 'least', 'well', 'good', 'bad',
+    'all', 'both', 'each', 'every', 'some', 'any', 'no', 'not', 'yes', 'yeah', 'ok', 'okay',
+    'got', 'get', 'gets', 'getting', 'go', 'goes', 'going', 'went', 'gone', 'come', 'comes', 'coming', 'came',
+    'know', 'knows', 'knew', 'think', 'thinks', 'thought', 'see', 'sees', 'saw', 'say', 'says', 'said', 'tell', 'tells', 'told',
+    'like', 'likes', 'liked', 'want', 'wants', 'wanted', 'need', 'needs', 'needed', 'try', 'tries', 'tried',
+    'uh', 'um', 'ah', 'oh', 'hmm', 'er', 'haha', 'lol', 'literally', 'actually', 'basically', 'obviously'
+  ]);
 
-  // Extract topics from transcript using keyword/phrase analysis
-  const topics = extractTopicsFromTranscript(transcriptText || '');
-  
-  // Also try to match against user's saved joke headers for better alignment
-  let savedHeaders = [];
+  // Fetch user's saved jokes for training/matching
+  let savedJokes = [];
   try {
     if (user && supabaseAdmin) {
       const { data } = await supabaseAdmin
         .from('jokes')
-        .select('header')
+        .select('id, header, sections')
         .eq('user_id', user.id)
         .order('updated_at', { ascending: false })
-        .limit(30);
-      savedHeaders = (data || []).map(r => r.header).filter(Boolean);
+        .limit(50); // Get more jokes for better matching
+      savedJokes = (data || []).filter(j => j.header && j.header.trim().length > 0);
     }
-  } catch (_) {}
-
-  // Determine number of jokes/topics (minimum 4 for a 7-minute set, max based on duration)
-  const estimatedMinutes = (transcriptText || '').split(/\s+/).length / 150; // ~150 words per minute
-  const minJokes = 4;
-  const maxJokes = Math.max(minJokes, Math.min(12, Math.ceil(estimatedMinutes) + 1));
-  const numJokes = Math.max(minJokes, Math.min(maxJokes, Math.max(topics.length, savedHeaders.length || 6)));
-
-  // Build headers: prefer topics from transcript, fallback to saved headers, then generic
-  const headers = [];
-  for (let i = 0; i < numJokes; i++) {
-    if (topics[i]) {
-      headers.push(topics[i].topic);
-    } else if (savedHeaders[i]) {
-      headers.push(savedHeaders[i]);
-    } else {
-      headers.push(`Joke ${i + 1}`);
-    }
+  } catch (err) {
+    console.log('Error fetching jokes for matching:', err.message);
   }
 
-  return headers.map((h, i) => ({ jokeIndex: i, header: h, laughs: 0 }));
+  // Segment transcript into joke candidates
+  const segments = segmentTranscriptIntoJokes(jobWords, transcriptText, jobChapters, 4, estimatedMinutes);
+  
+  if (segments.length === 0) {
+    // Fallback: create generic segments
+    const minJokes = 4;
+    const numJokes = Math.max(minJokes, Math.min(12, Math.ceil(estimatedMinutes) + 1));
+    return Array.from({ length: numJokes }, (_, i) => ({
+      jokeIndex: i,
+      header: `Joke ${i + 1}`,
+      laughs: 0
+    }));
+  }
+
+  // Match segments to saved jokes using similarity
+  const matchedSegments = matchSegmentsToJokes(segments, savedJokes, stopWords);
+
+  // Convert to joke metrics format
+  return matchedSegments.map((segment, i) => {
+    let header = segment.matchedHeader || segment.headline || segment.extractedTopic;
+    
+    // Capitalize first letter
+    if (header) {
+      header = header.charAt(0).toUpperCase() + header.slice(1);
+    } else {
+      header = `Joke ${i + 1}`;
+    }
+    
+    return {
+      jokeIndex: i,
+      header,
+      laughs: 0,
+      startTime: segment.startTime,
+      endTime: segment.endTime,
+      matchedJokeId: segment.matchedJokeId || null,
+      similarity: segment.similarity || 0
+    };
+  });
 };
 
 // Helper to extract user from JWT
