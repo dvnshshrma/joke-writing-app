@@ -186,18 +186,22 @@ function ComedyStyle() {
         const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
         const apiUrl = isProduction ? '/api' : 'http://localhost:3001/api'
         
-        const response = await fetch(`${apiUrl}/comedy-style/job/${jobId}`, { headers })
+        const pollUrl = `${apiUrl}/comedy-style/job/${jobId}`
+        console.log('Polling for job status:', pollUrl, 'Attempt:', attempts + 1)
+        
+        const response = await fetch(pollUrl, { headers })
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }))
           const errorMsg = errorData.error || `HTTP error ${response.status}`
-          console.error('Polling error:', errorMsg, errorData)
+          console.error('Polling error:', errorMsg, errorData, 'Status:', response.status)
           throw new Error(`Failed to check analysis status: ${errorMsg}`)
         }
 
         const result = await response.json()
 
         if (result.status === 'completed') {
+          console.log('✅ Analysis completed successfully')
           setAnalysisResult(result.result)
           return true
         } else if (result.status === 'failed') {
@@ -206,6 +210,7 @@ function ComedyStyle() {
           throw new Error(result.error || 'AssemblyAI job failed')
         }
 
+        console.log('Job status:', result.status, '- continuing to poll...')
         return false
       } catch (err) {
         console.error('Error polling for results:', err)
