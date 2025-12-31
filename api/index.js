@@ -1180,15 +1180,20 @@ export default async function handler(req, res) {
 
       // Job completed - analyze transcript
       const transcriptText = job.text || '';
-      const styleTags = analyzeComedyStyles(transcriptText);
-      const writingElements = analyzeWritingElements(transcriptText, job.words || []);
-      const summary = generateStyleSummary(styleTags, writingElements);
+      const words = job.words || [];
+      
+      // Enhanced analysis with Adam Bloom tools
+      const styleTags = await analyzeComedyStyles(transcriptText); // Made async for potential OpenAI integration
+      const writingElements = analyzeWritingElements(transcriptText, words);
+      const bloomTools = analyzeAdamBloomTools(transcriptText, words);
+      const summary = generateStyleSummary(styleTags, writingElements, bloomTools);
 
       return res.json({
         status: 'completed',
         result: {
           styleTags,
           writingElements,
+          bloomTools,
           summary,
           transcriptText
         }
@@ -1203,10 +1208,95 @@ export default async function handler(req, res) {
   }
 }
 
-// Analyze comedy style tags from transcript
-const analyzeComedyStyles = (transcriptText) => {
+// Count syllables in a word (JavaScript implementation)
+const countSyllables = (word) => {
+  if (!word || word.length === 0) return 1;
+  
+  const cleaned = word.toLowerCase().replace(/[^a-z]/g, '');
+  if (cleaned.length <= 2) return 1;
+  
+  // Count vowel groups
+  const vowelGroups = cleaned.match(/[aeiou]+/g);
+  let count = vowelGroups ? vowelGroups.length : 0;
+  
+  // Adjust for silent 'e' at end
+  if (cleaned.endsWith('e') && count > 1) count--;
+  
+  // Adjust for diphthongs
+  const diphthongs = (cleaned.match(/[aeiou]{2}/g) || []).length;
+  if (diphthongs > 0) count = Math.max(1, count - diphthongs + 1);
+  
+  return Math.max(1, count);
+};
+
+// OpenAI zero-shot classification for comedy styles (optional enhancement)
+const classifyStylesWithOpenAI = async (transcriptText) => {
+  if (!OPENAI_API_KEY || !transcriptText) return null;
+  
+  try {
+    const COMEDY_STYLES_LIST = [
+      'Anecdotal', 'Clowning', 'Edgy', 'Fantastical', 'Heartfelt',
+      'Observational', 'Opinionated', 'Playful', 'Puns', 'Philosophical',
+      'Sarcasm', 'Satire', 'Self-deprecation', 'Shock', 'Superiority',
+      'Surrealism', 'Tragedy', 'Wordplay'
+    ];
+    
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an expert comedy analyst. Return only valid JSON with style names as keys and scores (0.0-1.0) as values.'
+          },
+          {
+            role: 'user',
+            content: `Analyze this comedy bit and classify which comedy styles apply (0.0-1.0):\n\n"${transcriptText.substring(0, 500)}"\n\nStyles: ${COMEDY_STYLES_LIST.join(', ')}\n\nReturn JSON: {"StyleName": score, ...}`
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: 500
+      })
+    });
+    
+    if (!response.ok) return null;
+    
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) return null;
+    
+    // Extract JSON from response
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const scores = JSON.parse(jsonMatch[0]);
+      return COMEDY_STYLES_LIST.map(style => ({
+        name: style,
+        score: Math.min(1, Math.max(0, parseFloat(scores[style] || 0)))
+      }));
+    }
+  } catch (err) {
+    console.log('OpenAI classification error:', err.message);
+  }
+  
+  return null;
+};
+
+// Analyze comedy style tags from transcript (with optional OpenAI zero-shot classification)
+const analyzeComedyStyles = async (transcriptText) => {
   if (!transcriptText) return [];
 
+  // Try OpenAI zero-shot classification first (if API key available)
+  const openaiScores = await classifyStylesWithOpenAI(transcriptText);
+  if (openaiScores) {
+    return openaiScores.sort((a, b) => b.score - a.score);
+  }
+
+  // Fallback to keyword-based classification
   const text = transcriptText.toLowerCase();
   const styles = [
     {

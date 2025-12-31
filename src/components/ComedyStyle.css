@@ -374,6 +374,105 @@
   margin: 0;
 }
 
+/* Adam Bloom Tools Section */
+.bloom-tools-section {
+  background: linear-gradient(135deg, #e6f3ff 0%, #fff0e6 100%);
+  border-radius: 12px;
+  padding: 2rem;
+}
+
+.bloom-tools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.bloom-tool-card {
+  background: white;
+  border: 2px solid #ddd;
+  border-radius: 12px;
+  padding: 1.5rem;
+  transition: all 0.3s ease;
+}
+
+.bloom-tool-card:hover {
+  border-color: #667eea;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+  transform: translateY(-2px);
+}
+
+.bloom-tool-card h4 {
+  color: #333;
+  font-size: 1.3rem;
+  margin: 0 0 1rem 0;
+  border-bottom: 2px solid #e0e0e0;
+  padding-bottom: 0.5rem;
+}
+
+.bloom-tool-card .detected {
+  color: #22c55e;
+  font-weight: 600;
+  margin: 0.5rem 0;
+}
+
+.bloom-tool-card .not-detected {
+  color: #999;
+  font-weight: 600;
+  margin: 0.5rem 0;
+}
+
+.tool-description {
+  color: #666;
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+}
+
+.tool-examples {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e0e0e0;
+}
+
+.tool-examples strong {
+  color: #333;
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.tool-examples ul {
+  margin: 0;
+  padding-left: 1.5rem;
+  color: #555;
+}
+
+.tool-examples li {
+  margin: 0.5rem 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.trimming-card {
+  grid-column: span 2;
+}
+
+.efficiency-gain {
+  color: #667eea;
+  font-weight: 600;
+  margin: 0.5rem 0;
+  font-size: 1.1rem;
+}
+
+@media (max-width: 768px) {
+  .bloom-tools-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .trimming-card {
+    grid-column: span 1;
+  }
+}
+
 /* Mobile Responsive */
 @media (max-width: 768px) {
   .comedy-style {

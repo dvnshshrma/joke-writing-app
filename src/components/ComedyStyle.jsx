@@ -394,6 +394,108 @@ function ComedyStyle() {
             )}
           </div>
 
+          {/* Adam Bloom Tools Section */}
+          {analysisResult.bloomTools && (
+            <div className="results-section bloom-tools-section">
+              <h3>🛠️ Adam Bloom Writing Tools</h3>
+              
+              <div className="bloom-tools-grid">
+                <div className="bloom-tool-card">
+                  <h4>Seesaw Theory</h4>
+                  <p className={analysisResult.bloomTools.seesawTheory.detected ? 'detected' : 'not-detected'}>
+                    {analysisResult.bloomTools.seesawTheory.detected 
+                      ? `✅ Detected (${analysisResult.bloomTools.seesawTheory.count} instances)` 
+                      : '❌ Not detected'}
+                  </p>
+                  {analysisResult.bloomTools.seesawTheory.segments?.length > 0 && (
+                    <div className="tool-examples">
+                      <strong>Examples:</strong>
+                      <ul>
+                        {analysisResult.bloomTools.seesawTheory.segments.slice(0, 3).map((seg, i) => (
+                          <li key={i}>{seg.text.substring(0, 100)}...</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+
+                <div className="bloom-tool-card">
+                  <h4>Balloon Pop</h4>
+                  <p className={analysisResult.bloomTools.balloonPop.detected ? 'detected' : 'not-detected'}>
+                    {analysisResult.bloomTools.balloonPop.detected 
+                      ? `✅ Detected (${analysisResult.bloomTools.balloonPop.count} instances)` 
+                      : '❌ Not detected'}
+                  </p>
+                  {analysisResult.bloomTools.balloonPop.segments?.length > 0 && (
+                    <div className="tool-examples">
+                      <strong>Examples:</strong>
+                      <ul>
+                        {analysisResult.bloomTools.balloonPop.segments.slice(0, 3).map((seg, i) => (
+                          <li key={i}>{seg.text.substring(0, 100)}...</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+
+                <div className="bloom-tool-card">
+                  <h4>Word Smuggling</h4>
+                  <p className={analysisResult.bloomTools.wordSmuggling.detected ? 'detected' : 'not-detected'}>
+                    {analysisResult.bloomTools.wordSmuggling.detected 
+                      ? `✅ Detected (${analysisResult.bloomTools.wordSmuggling.count} instances)` 
+                      : '❌ Not detected'}
+                  </p>
+                  {analysisResult.bloomTools.wordSmuggling.segments?.length > 0 && (
+                    <div className="tool-examples">
+                      <strong>Examples:</strong>
+                      <ul>
+                        {analysisResult.bloomTools.wordSmuggling.segments.slice(0, 3).map((seg, i) => (
+                          <li key={i}>{seg.text.substring(0, 100)}...</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+
+                <div className="bloom-tool-card">
+                  <h4>Toppers</h4>
+                  <p className={analysisResult.bloomTools.toppers.detected ? 'detected' : 'not-detected'}>
+                    {analysisResult.bloomTools.toppers.detected 
+                      ? `✅ Detected (${analysisResult.bloomTools.toppers.count} instances)` 
+                      : '❌ Not detected'}
+                  </p>
+                  <p className="tool-description">Follow-up jokes on the same premise</p>
+                </div>
+
+                <div className="bloom-tool-card trimming-card">
+                  <h4>Trimming Opportunities</h4>
+                  {analysisResult.bloomTools.trimming.totalRedundantSyllables > 0 ? (
+                    <>
+                      <p className="detected">
+                        ✅ {analysisResult.bloomTools.trimming.totalRedundantSyllables} redundant syllables detected
+                      </p>
+                      <p className="efficiency-gain">
+                        Potential efficiency gain: {analysisResult.bloomTools.trimming.estimatedEfficiencyGain}
+                      </p>
+                      {analysisResult.bloomTools.trimming.opportunities?.length > 0 && (
+                        <div className="tool-examples">
+                          <strong>Suggestions:</strong>
+                          <ul>
+                            {analysisResult.bloomTools.trimming.opportunities.slice(0, 5).map((opp, i) => (
+                              <li key={i}>{opp.suggestion || opp.pattern}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="not-detected">❌ No major trimming opportunities found</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Summary Section */}
           {analysisResult.summary && (
             <div className="results-section summary-section">
