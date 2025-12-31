@@ -189,7 +189,10 @@ function ComedyStyle() {
         const response = await fetch(`${apiUrl}/comedy-style/job/${jobId}`, { headers })
 
         if (!response.ok) {
-          throw new Error('Failed to check analysis status')
+          const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }))
+          const errorMsg = errorData.error || `HTTP error ${response.status}`
+          console.error('Polling error:', errorMsg, errorData)
+          throw new Error(`Failed to check analysis status: ${errorMsg}`)
         }
 
         const result = await response.json()
@@ -199,24 +202,40 @@ function ComedyStyle() {
           return true
         } else if (result.status === 'failed') {
           throw new Error(result.error || 'Analysis failed')
+        } else if (result.status === 'error') {
+          throw new Error(result.error || 'AssemblyAI job failed')
         }
 
         return false
       } catch (err) {
         console.error('Error polling for results:', err)
+        // Don't throw immediately - allow retries for network errors
+        if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+          // Network error - will retry
+          return false
+        }
+        // Other errors - throw to stop polling
         throw err
       }
     }
 
     while (attempts < maxAttempts) {
-      const completed = await poll()
-      if (completed) return
+      try {
+        const completed = await poll()
+        if (completed) return
+      } catch (err) {
+        // If it's a fatal error (not a network error), stop polling
+        if (!err.message.includes('Failed to fetch') && !err.message.includes('NetworkError')) {
+          throw err
+        }
+        // Otherwise continue polling (network error)
+      }
 
       attempts++
       await new Promise(resolve => setTimeout(resolve, 5000)) // Wait 5 seconds
     }
 
-    throw new Error('Analysis timed out. Please try again.')
+    throw new Error('Analysis timed out after 5 minutes. Please try again.')
   }
 
   const getStyleScore = (styleName) => {

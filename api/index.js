@@ -1169,44 +1169,55 @@ export default async function handler(req, res) {
     }
 
     // COMEDY STYLE JOB POLLING
-    const styleJobMatch = path.match(/^\/comedy-style\/job\/([^/]+)$/);
+    const styleJobMatch = path.match(/^\/comedy-style\/job\/(.+)$/);
     if (styleJobMatch && method === 'GET') {
       const jobId = styleJobMatch[1];
       
       if (!ASSEMBLYAI_API_KEY) {
-        return res.status(400).json({ error: 'ASSEMBLYAI_API_KEY is missing on server' });
+        return res.status(400).json({ error: 'ASSEMBLYAI_API_KEY is missing on server', status: 'failed' });
       }
 
-      const job = await fetchAssemblyAI(`/transcript/${jobId}`, { method: 'GET' });
-      
-      if (job.status === 'error') {
-        return res.status(500).json({ error: job.error || 'AssemblyAI job failed', status: 'failed' });
-      }
-
-      if (job.status !== 'completed') {
-        return res.json({ status: job.status, jobId });
-      }
-
-      // Job completed - analyze transcript
-      const transcriptText = job.text || '';
-      const words = job.words || [];
-      
-      // Enhanced analysis with Adam Bloom tools
-      const styleTags = await analyzeComedyStyles(transcriptText); // Made async for potential OpenAI integration
-      const writingElements = analyzeWritingElements(transcriptText, words);
-      const bloomTools = analyzeAdamBloomTools(transcriptText, words);
-      const summary = generateStyleSummary(styleTags, writingElements, bloomTools);
-
-      return res.json({
-        status: 'completed',
-        result: {
-          styleTags,
-          writingElements,
-          bloomTools,
-          summary,
-          transcriptText
+      try {
+        const job = await fetchAssemblyAI(`/transcript/${jobId}`, { method: 'GET' });
+        
+        if (job.status === 'error') {
+          return res.status(500).json({ 
+            status: 'failed',
+            error: job.error || 'AssemblyAI job failed' 
+          });
         }
-      });
+
+        if (job.status !== 'completed') {
+          return res.json({ status: job.status, jobId });
+        }
+
+        // Job completed - analyze transcript
+        const transcriptText = job.text || '';
+        const words = job.words || [];
+        
+        // Enhanced analysis with Adam Bloom tools
+        const styleTags = await analyzeComedyStyles(transcriptText);
+        const writingElements = analyzeWritingElements(transcriptText, words);
+        const bloomTools = analyzeAdamBloomTools(transcriptText, words);
+        const summary = generateStyleSummary(styleTags, writingElements, bloomTools);
+
+        return res.json({
+          status: 'completed',
+          result: {
+            styleTags,
+            writingElements,
+            bloomTools,
+            summary,
+            transcriptText
+          }
+        });
+      } catch (error) {
+        console.error('Error fetching AssemblyAI job:', error);
+        return res.status(500).json({ 
+          status: 'failed',
+          error: error.message || 'Failed to fetch transcript status' 
+        });
+      }
     }
 
     return res.status(404).json({ error: 'Not found', path });
