@@ -25,6 +25,15 @@ const supabasePublic = supabaseUrl && supabaseAnonKey
 
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
 const ASSEMBLYAI_BASE_URL = 'https://api.assemblyai.com/v2';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_API_KEY;
+
+// Log OpenAI availability (for debugging)
+if (OPENAI_API_KEY) {
+  console.log('✅ OpenAI API key found - will use GPT for style classification');
+} else {
+  console.log('ℹ️  OpenAI API key not found - using keyword-based classification');
+  console.log('   Set OPENAI_API_KEY environment variable for more accurate results');
+}
 
 // ---------- Analysis helpers (serverless / mock) ----------
 const buildMockTimeline = (effectiveDurationSeconds, stepSeconds = 10) => {
