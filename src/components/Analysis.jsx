@@ -442,12 +442,21 @@ function Analysis() {
                   <div className="analysis-detail">
                     <div className="analysis-detail-header">
                       <h2>{selectedAnalysis.setName || 'Untitled Set'}</h2>
-                      <button 
-                        className="view-analysis-btn"
-                        onClick={() => handleViewAnalysis(selectedAnalysis.id)}
-                      >
-                        📊 View Full Analysis
-                      </button>
+                      <div className="analysis-detail-actions">
+                        <button 
+                          className="reanalyze-btn"
+                          onClick={() => handleReAnalyze(selectedAnalysis)}
+                          title="Re-analyze this set with a new audio file"
+                        >
+                          🔄 Re-analyze
+                        </button>
+                        <button 
+                          className="view-analysis-btn"
+                          onClick={() => handleViewAnalysis(selectedAnalysis.id)}
+                        >
+                          📊 View Full Analysis
+                        </button>
+                      </div>
                     </div>
                     
                     <div className="analysis-detail-summary">

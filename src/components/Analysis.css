@@ -1240,7 +1240,12 @@
     align-items: flex-start;
   }
 
-  .view-analysis-btn {
+  .analysis-detail-actions {
+    width: 100%;
+  }
+
+  .view-analysis-btn,
+  .reanalyze-btn {
     width: 100%;
   }
 }
