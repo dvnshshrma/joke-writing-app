@@ -58,18 +58,28 @@ function ComedyStyle() {
     // Validate file type (use flexible check like Analysis component)
     const isAudio = file.type.startsWith('audio/')
     const isVideo = file.type.startsWith('video/')
-    
+
     // Also check file extension as fallback (some browsers don't set MIME type correctly)
     const fileName = file.name.toLowerCase()
     const audioExtensions = ['.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac', '.webm', '.wma']
     const videoExtensions = ['.mp4', '.mov', '.avi', '.webm', '.mkv', '.flv', '.wmv']
     const hasAudioExt = audioExtensions.some(ext => fileName.endsWith(ext))
     const hasVideoExt = videoExtensions.some(ext => fileName.endsWith(ext))
-    
+
     if (!isAudio && !isVideo && !hasAudioExt && !hasVideoExt) {
       alert('Please upload an audio or video file (MP3, WAV, M4A, MP4, MOV, WEBM, etc.)')
       setError('Invalid file type. Please select an audio or video file.')
       return
+    }
+
+    // Check file size (Vercel/Supabase limits)
+    // Supabase free tier: 50MB per file, Vercel: 4.5MB request body (but we upload to storage)
+    const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB (conservative limit)
+    if (file.size > MAX_FILE_SIZE) {
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
+      alert(`File is too large (${sizeMB}MB). Maximum size is 100MB. Please use a smaller file or compress it.`);
+      setError(`File too large: ${sizeMB}MB. Maximum: 100MB`);
+      return;
     }
 
     setAudioFile(file)

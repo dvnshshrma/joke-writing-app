@@ -1201,6 +1201,13 @@ export default async function handler(req, res) {
         const bloomTools = analyzeAdamBloomTools(transcriptText, words);
         const summary = generateStyleSummary(styleTags, writingElements, bloomTools);
 
+        // Truncate transcript if too long to avoid response size limits
+        // Vercel has ~4.5MB response limit, so we'll include a preview only
+        const MAX_TRANSCRIPT_LENGTH = 5000; // ~1000 words
+        const transcriptPreview = transcriptText.length > MAX_TRANSCRIPT_LENGTH
+          ? transcriptText.substring(0, MAX_TRANSCRIPT_LENGTH) + '... (truncated)'
+          : transcriptText;
+
         return res.json({
           status: 'completed',
           result: {
@@ -1208,7 +1215,9 @@ export default async function handler(req, res) {
             writingElements,
             bloomTools,
             summary,
-            transcriptText
+            transcriptText: transcriptPreview,
+            transcriptLength: transcriptText.length,
+            wordCount: words.length
           }
         });
       } catch (error) {
