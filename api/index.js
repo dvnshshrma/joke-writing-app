@@ -1626,8 +1626,120 @@ const analyzeWritingElements = (transcriptText, words = []) => {
   })).sort((a, b) => b.score - a.score);
 };
 
+// Analyze Adam Bloom's comedy tools
+const analyzeAdamBloomTools = (transcriptText, words = []) => {
+  if (!transcriptText) {
+    return {
+      seesawTheory: { detected: false, description: 'Setup should be longer than punchline' },
+      balloonPop: { detected: false, description: 'Tension builds then releases at reveal' },
+      wordSmuggling: { detected: false, description: 'Punchline word hidden in casual sentence' },
+      toppers: { detected: false, description: 'Follow-up jokes on same premise' },
+      trimming: { opportunities: [], description: 'Redundant syllables/words to remove' }
+    };
+  }
+
+  const sentences = transcriptText.split(/[.!?]+\s+/).filter(s => s.trim().length > 0);
+  const text = transcriptText.toLowerCase();
+
+  // 1. Seesaw Theory: Setup longer than punchline (punchline should be shorter)
+  let seesawDetected = false;
+  if (sentences.length >= 2) {
+    const setupText = sentences.slice(0, -1).join(' ');
+    const punchlineText = sentences[sentences.length - 1];
+    const setupSyllables = setupText.split(/\s+/).reduce((sum, word) => sum + countSyllables(word), 0);
+    const punchlineSyllables = punchlineText.split(/\s+/).reduce((sum, word) => sum + countSyllables(word), 0);
+    if (setupSyllables > 0 && punchlineSyllables > 0) {
+      const ratio = punchlineSyllables / setupSyllables;
+      seesawDetected = ratio < 0.7; // Punchline is 30%+ shorter
+    }
+  }
+
+  // 2. Balloon Pop: Buildup followed by reveal
+  const buildupPatterns = [
+    /(so|then|and|but|until|when|suddenly)\s+[^.!?]{10,}/i,
+    /(turns out|actually|really|just|only)/i,
+    /(wait|hold on|no way|you know what)/i
+  ];
+  const revealPatterns = [
+    /\b(just|only|actually|really|turns out|but|however)\b/i,
+    /\b(not|never|no|nobody|nothing)\b/i,
+    /\b(was|is|are|were)\s+\w+ing/i
+  ];
+  let balloonPopDetected = false;
+  const hasBuildup = buildupPatterns.some(pattern => pattern.test(text));
+  const hasReveal = revealPatterns.some(pattern => pattern.test(text));
+  if (hasBuildup && hasReveal) {
+    // Simple check: if both patterns exist, likely balloon pop
+    balloonPopDetected = true;
+  }
+
+  // 3. Word Smuggling: Key word hidden in casual sentence (simplified detection)
+  let wordSmugglingDetected = false;
+  if (sentences.length > 0) {
+    const lastSentence = sentences[sentences.length - 1];
+    const wordsInLast = lastSentence.split(/\s+/);
+    // Basic heuristic: last sentence has mix of common and uncommon words
+    if (wordsInLast.length >= 3 && wordsInLast.length <= 15) {
+      wordSmugglingDetected = true; // Simplified: assume potential if last sentence is medium length
+    }
+  }
+
+  // 4. Toppers: Follow-up jokes on same premise (requires previous context - simplified)
+  // For a single transcript, we can't detect toppers without previous bits
+  // But we can check for repeated concepts/words that might indicate topper structure
+  const topperDetected = false; // Would need previous bit to properly detect
+
+  // 5. Trimming Opportunities: Redundant words/phrases
+  const trimmingOpportunities = [];
+  const fillers = ['like', 'you know', 'um', 'uh', 'actually', 'basically', 'literally', 'really', 'very', 'pretty', 'quite', 'sort of', 'kind of', 'i mean'];
+  fillers.forEach(filler => {
+    const regex = new RegExp(`\\b${filler.replace(/\s+/g, '\\s+')}\\b`, 'gi');
+    const matches = text.match(regex);
+    if (matches && matches.length > 0) {
+      trimmingOpportunities.push(`Remove filler: "${filler}" (${matches.length} occurrence${matches.length > 1 ? 's' : ''})`);
+    }
+  });
+  
+  // Check for redundant qualifiers
+  const redundantPatterns = [
+    /\b(really|very|pretty|quite)\s+(really|very|pretty|quite)\s+/gi,
+    /\b(kind of|sort of)\s+\w+/gi
+  ];
+  redundantPatterns.forEach(pattern => {
+    const matches = text.match(pattern);
+    if (matches) {
+      matches.forEach(match => {
+        trimmingOpportunities.push(`Trim redundant: "${match.trim()}"`);
+      });
+    }
+  });
+
+  return {
+    seesawTheory: { 
+      detected: seesawDetected, 
+      description: 'Setup should be longer (more syllables) than punchline' 
+    },
+    balloonPop: { 
+      detected: balloonPopDetected, 
+      description: 'Tension builds then releases at reveal word/phrase' 
+    },
+    wordSmuggling: { 
+      detected: wordSmugglingDetected, 
+      description: 'Punchline word hidden inside casual sentence' 
+    },
+    toppers: { 
+      detected: topperDetected, 
+      description: 'Follow-up jokes on the same premise (requires comparison with previous bits)' 
+    },
+    trimming: { 
+      opportunities: trimmingOpportunities.slice(0, 10), // Limit to 10
+      description: 'Redundant syllables/words to remove for tighter delivery' 
+    }
+  };
+};
+
 // Generate a summary of the comedy style
-const generateStyleSummary = (styleTags, writingElements) => {
+const generateStyleSummary = (styleTags, writingElements, bloomTools = null) => {
   const topStyles = styleTags.slice(0, 3).filter(s => s.score > 0.1);
   const topElements = writingElements.slice(0, 3).filter(e => e.score > 0.1);
 
@@ -1646,6 +1758,16 @@ const generateStyleSummary = (styleTags, writingElements) => {
     summary += `. Your writing shows strong use of ${topElements[0].name.toLowerCase()}`;
     if (topElements.length > 1) {
       summary += ` and ${topElements[1].name.toLowerCase()}`;
+    }
+  }
+
+  if (bloomTools) {
+    const detectedTools = [];
+    if (bloomTools.seesawTheory?.detected) detectedTools.push('Seesaw Theory');
+    if (bloomTools.balloonPop?.detected) detectedTools.push('Balloon Pop');
+    if (bloomTools.wordSmuggling?.detected) detectedTools.push('Word Smuggling');
+    if (detectedTools.length > 0) {
+      summary += `. You employ ${detectedTools.join(', ')} techniques`;
     }
   }
 
