@@ -514,7 +514,7 @@ const buildJokeMetricsFromTranscript = async ({ user, transcriptText, jobWords =
   try {
     if (user && supabaseAdmin) {
       const { data } = await supabaseAdmin
-        .from('jokes')
+      .from('jokes')
         .select('id, header, sections')
         .eq('user_id', user.id)
         .order('updated_at', { ascending: false })
@@ -663,10 +663,10 @@ export default async function handler(req, res) {
       
       if (method === 'GET') {
         const { data, error } = await supabaseAdmin.from('jokes').select('*').eq('id', jokeId).single();
-        if (error) {
+    if (error) {
           if (error.code === 'PGRST116') return res.status(404).json({ error: 'Joke not found' });
-          throw error;
-        }
+      throw error;
+    }
         return res.json({
       id: data.id,
       header: data.header,
@@ -757,10 +757,10 @@ export default async function handler(req, res) {
       
       if (method === 'GET') {
         const { data, error } = await supabaseAdmin.from('sets').select('*').eq('id', setId).single();
-        if (error) {
+    if (error) {
           if (error.code === 'PGRST116') return res.status(404).json({ error: 'Set not found' });
-          throw error;
-        }
+      throw error;
+    }
         return res.json({
       id: data.id,
       header: data.header,
@@ -836,7 +836,7 @@ export default async function handler(req, res) {
     // NOTE: Deployed serverless does not accept large file uploads; the frontend sends JSON in production.
     if (path === '/analysis/analyze' || path === '/analysis/analyze/') {
       if (method === 'POST') {
-        const {
+    const {
           setId,
           setName,
           audioDuration,
@@ -917,8 +917,8 @@ export default async function handler(req, res) {
         };
 
         const { error } = await supabaseAdmin.from('analysis_results').insert([analysisDoc]);
-        if (error) throw error;
-
+    if (error) throw error;
+    
         return res.json({
           id: analysisId,
           setName,
@@ -1120,6 +1120,81 @@ export default async function handler(req, res) {
       }
     }
 
+    // COMEDY STYLE ANALYSIS ENDPOINTS
+    if (path === '/comedy-style/analyze' || path === '/comedy-style/analyze/') {
+      if (method === 'POST') {
+        const { fileName, storageBucket, storagePath } = body || {};
+        
+        if (!ASSEMBLYAI_API_KEY) {
+          return res.status(400).json({ error: 'ASSEMBLYAI_API_KEY is missing on server' });
+        }
+
+        if (!storageBucket || !storagePath) {
+          return res.status(400).json({ error: 'storageBucket and storagePath are required' });
+        }
+
+        // Create signed URL for AssemblyAI
+        const { data: signed, error: signedErr } = await supabaseAdmin
+          .storage
+          .from(storageBucket)
+          .createSignedUrl(storagePath, 60 * 60);
+        if (signedErr) throw signedErr;
+
+        // Start AssemblyAI transcription
+        const job = await fetchAssemblyAI('/transcript', {
+          method: 'POST',
+          body: JSON.stringify({
+            audio_url: signed.signedUrl,
+            punctuate: true,
+            format_text: true,
+            auto_chapters: true,
+          }),
+        });
+
+        return res.json({
+          status: 'processing',
+          jobId: job.id,
+          fileName
+        });
+      }
+    }
+
+    // COMEDY STYLE JOB POLLING
+    const styleJobMatch = path.match(/^\/comedy-style\/job\/([^/]+)$/);
+    if (styleJobMatch && method === 'GET') {
+      const jobId = styleJobMatch[1];
+      
+      if (!ASSEMBLYAI_API_KEY) {
+        return res.status(400).json({ error: 'ASSEMBLYAI_API_KEY is missing on server' });
+      }
+
+      const job = await fetchAssemblyAI(`/transcript/${jobId}`, { method: 'GET' });
+      
+      if (job.status === 'error') {
+        return res.status(500).json({ error: job.error || 'AssemblyAI job failed', status: 'failed' });
+      }
+
+      if (job.status !== 'completed') {
+        return res.json({ status: job.status, jobId });
+      }
+
+      // Job completed - analyze transcript
+      const transcriptText = job.text || '';
+      const styleTags = analyzeComedyStyles(transcriptText);
+      const writingElements = analyzeWritingElements(transcriptText, job.words || []);
+      const summary = generateStyleSummary(styleTags, writingElements);
+
+      return res.json({
+        status: 'completed',
+        result: {
+          styleTags,
+          writingElements,
+          summary,
+          transcriptText
+        }
+      });
+    }
+
     return res.status(404).json({ error: 'Not found', path });
 
   } catch (error) {
@@ -1127,3 +1202,316 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: error.message });
   }
 }
+
+// Analyze comedy style tags from transcript
+const analyzeComedyStyles = (transcriptText) => {
+  if (!transcriptText) return [];
+
+  const text = transcriptText.toLowerCase();
+  const styles = [
+    {
+      name: 'Anecdotal',
+      keywords: ['story', 'happened', 'one time', 'remember', 'when i', 'told me', 'went to', 'experience', 'once', 'narrative'],
+      weight: 1.0
+    },
+    {
+      name: 'Clowning',
+      keywords: ['silly', 'ridiculous', 'absurd', 'goofy', 'funny', 'weird', 'strange', 'crazy', 'wacky', 'nuts'],
+      weight: 1.0
+    },
+    {
+      name: 'Edgy',
+      keywords: ['damn', 'hell', 'fuck', 'shit', 'controversial', 'offensive', 'dark', 'boundary', 'taboo', 'provocative'],
+      weight: 1.2
+    },
+    {
+      name: 'Fantastical',
+      keywords: ['imagine', 'magic', 'fantasy', 'dream', 'unreal', 'impossible', 'supernatural', 'alien', 'monster', 'fairy'],
+      weight: 1.0
+    },
+    {
+      name: 'Heartfelt',
+      keywords: ['love', 'family', 'heart', 'feelings', 'emotion', 'touching', 'sweet', 'meaningful', 'genuine', 'sincere'],
+      weight: 1.0
+    },
+    {
+      name: 'Observational',
+      keywords: ['notice', 'did you ever', 'what is it with', 'why is it', 'always', 'never', 'everyone', 'people', 'thing about', 'observation'],
+      weight: 1.1
+    },
+    {
+      name: 'Opinionated',
+      keywords: ['think', 'believe', 'opinion', 'should', 'wrong', 'right', 'stupid', 'dumb', 'ridiculous', 'hate', 'love'],
+      weight: 1.0
+    },
+    {
+      name: 'Playful',
+      keywords: ['play', 'fun', 'joke', 'teasing', 'banter', 'cheeky', 'witty', 'clever', 'humor', 'amusing'],
+      weight: 1.0
+    },
+    {
+      name: 'Puns',
+      keywords: ['pun', 'play on words', 'double meaning', 'wordplay', 'punny'],
+      weight: 1.3
+    },
+    {
+      name: 'Philosophical',
+      keywords: ['meaning', 'life', 'exist', 'universe', 'reality', 'truth', 'question', 'wonder', 'think about', 'deep'],
+      weight: 1.1
+    },
+    {
+      name: 'Sarcasm',
+      keywords: ['yeah right', 'sure', 'obviously', 'totally', 'great', 'wonderful', 'perfect', 'love that', 'sarcastic', 'ironic'],
+      weight: 1.2
+    },
+    {
+      name: 'Satire',
+      keywords: ['society', 'politics', 'government', 'system', 'institution', 'mock', 'parody', 'criticize', 'satirical'],
+      weight: 1.1
+    },
+    {
+      name: 'Self-deprecation',
+      keywords: ['i\'m so', 'i\'m terrible', 'i suck', 'i\'m bad', 'i can\'t', 'i\'m not good', 'pathetic', 'loser', 'myself', 'i\'m an idiot'],
+      weight: 1.2
+    },
+    {
+      name: 'Shock',
+      keywords: ['what the', 'holy', 'unbelievable', 'incredible', 'amazing', 'wow', 'seriously', 'no way', 'shocking'],
+      weight: 1.0
+    },
+    {
+      name: 'Superiority',
+      keywords: ['better than', 'smarter', 'above', 'superior', 'i\'m better', 'others are', 'i\'m the best', 'everyone else'],
+      weight: 1.1
+    },
+    {
+      name: 'Surrealism',
+      keywords: ['surreal', 'dreamlike', 'bizarre', 'abstract', 'unrealistic', 'weird', 'strange', 'odd', 'peculiar'],
+      weight: 1.0
+    },
+    {
+      name: 'Tragedy',
+      keywords: ['sad', 'tragic', 'depressing', 'miserable', 'unfortunate', 'suffering', 'pain', 'loss', 'death', 'grief'],
+      weight: 1.1
+    },
+    {
+      name: 'Wordplay',
+      keywords: ['word', 'pun', 'double', 'meaning', 'play on', 'clever', 'wit', 'verbal', 'linguistic'],
+      weight: 1.2
+    }
+  ];
+
+  const scores = styles.map(style => {
+    let matches = 0;
+    style.keywords.forEach(keyword => {
+      const regex = new RegExp(keyword, 'gi');
+      const count = (text.match(regex) || []).length;
+      matches += count;
+    });
+    
+    // Normalize score (0-1) based on transcript length and keyword matches
+    const wordCount = text.split(/\s+/).length;
+    const normalizedScore = Math.min(1, (matches * style.weight) / Math.max(100, wordCount / 10));
+    
+    return {
+      name: style.name,
+      score: normalizedScore
+    };
+  });
+
+  // Sort by score descending
+  scores.sort((a, b) => b.score - a.score);
+  
+  return scores;
+};
+
+// Analyze writing elements from transcript
+const analyzeWritingElements = (transcriptText, words = []) => {
+  if (!transcriptText) return [];
+
+  const text = transcriptText.toLowerCase();
+  const sentences = transcriptText.split(/[.!?]+\s+/).filter(s => s.trim().length > 0);
+  const wordArray = text.split(/\s+/);
+
+  const elements = [
+    {
+      name: 'Setup-Punchline Structure',
+      detect: () => {
+        // Look for question-answer patterns, contrast patterns
+        const questionPattern = /(what|why|how|when|where|who|which)\s+[^?.]*[?]/gi;
+        const questions = (transcriptText.match(questionPattern) || []).length;
+        // Look for contrast words (but, however, except, instead)
+        const contrastWords = (text.match(/\b(but|however|except|instead|yet|although)\b/gi) || []).length;
+        return Math.min(1, (questions * 0.3 + contrastWords * 0.1) / Math.max(1, sentences.length / 5));
+      }
+    },
+    {
+      name: 'Callbacks',
+      detect: () => {
+        // Look for repeated phrases/concepts (indicating callbacks)
+        const phrases = {};
+        sentences.forEach(s => {
+          const words = s.toLowerCase().split(/\s+/).filter(w => w.length > 4);
+          words.forEach((w, i) => {
+            if (i < words.length - 2) {
+              const phrase = `${w} ${words[i + 1]}`;
+              phrases[phrase] = (phrases[phrase] || 0) + 1;
+            }
+          });
+        });
+        const repeated = Object.values(phrases).filter(count => count >= 2).length;
+        return Math.min(1, repeated / Math.max(3, sentences.length / 10));
+      }
+    },
+    {
+      name: 'Tags (Add-on jokes)',
+      detect: () => {
+        // Look for quick follow-up sentences after main points
+        const shortFollowUps = sentences.filter(s => {
+          const words = s.trim().split(/\s+/);
+          return words.length > 3 && words.length < 15;
+        }).length;
+        return Math.min(1, shortFollowUps / Math.max(5, sentences.length / 3));
+      }
+    },
+    {
+      name: 'Rule of Three',
+      detect: () => {
+        // Look for lists of three items
+        const threePattern = /[^.!?]*,\s*[^.!?]*,\s+and\s+[^.!?]*[.!?]/gi;
+        const matches = (transcriptText.match(threePattern) || []).length;
+        return Math.min(1, matches / Math.max(2, sentences.length / 10));
+      }
+    },
+    {
+      name: 'Incongruity',
+      detect: () => {
+        // Look for unexpected combinations or contradictions
+        const unexpected = (text.match(/\b(but|however|actually|really|wait|no|yes)\b/gi) || []).length;
+        return Math.min(1, unexpected / Math.max(5, wordArray.length / 50));
+      }
+    },
+    {
+      name: 'Misdirection',
+      detect: () => {
+        // Look for turns or shifts in narrative
+        const turns = (text.match(/\b(then|suddenly|but then|actually|wait|oh|turns out)\b/gi) || []).length;
+        return Math.min(1, turns / Math.max(3, sentences.length / 5));
+      }
+    },
+    {
+      name: 'Exaggeration',
+      detect: () => {
+        // Look for extreme language
+        const extremes = (text.match(/\b(never|always|every|all|huge|tiny|massive|giant|enormous|infinite|perfect|worst|best)\b/gi) || []).length;
+        return Math.min(1, extremes / Math.max(5, wordArray.length / 30));
+      }
+    },
+    {
+      name: 'Self-Awareness',
+      detect: () => {
+        // Look for meta-commentary
+        const meta = (text.match(/\b(i know|i realize|i notice|i\'m aware|admit|confess)\b/gi) || []).length;
+        return Math.min(1, meta / Math.max(2, sentences.length / 10));
+      }
+    },
+    {
+      name: 'Storytelling Arc',
+      detect: () => {
+        // Look for narrative structure (beginning, middle, end markers)
+        const storyMarkers = (text.match(/\b(started|began|then|next|finally|ended|finished|conclusion)\b/gi) || []).length;
+        const avgSentenceLength = wordArray.length / Math.max(1, sentences.length);
+        return Math.min(1, (storyMarkers * 0.3) / Math.max(3, sentences.length / 15) + (avgSentenceLength > 15 ? 0.3 : 0));
+      }
+    },
+    {
+      name: 'Timing & Pacing',
+      detect: () => {
+        // Analyze word timestamps for pacing (if available)
+        if (words.length > 0) {
+          const pauses = [];
+          for (let i = 1; i < words.length; i++) {
+            const gap = (words[i].start || 0) - (words[i - 1].end || 0);
+            if (gap > 500) pauses.push(gap); // 500ms+ pause
+          }
+          const avgPause = pauses.length > 0 ? pauses.reduce((a, b) => a + b, 0) / pauses.length : 0;
+          // Good timing has strategic pauses (not too many, not too few)
+          return Math.min(1, pauses.length / Math.max(10, wordArray.length / 100) * (avgPause > 1000 ? 1.2 : 1.0));
+        }
+        // Fallback: look for punctuation patterns
+        const pauses = (transcriptText.match(/[.!?]\s+/g) || []).length;
+        return Math.min(1, pauses / Math.max(10, sentences.length / 2));
+      }
+    },
+    {
+      name: 'Repetition',
+      detect: () => {
+        // Look for repeated words/phrases for emphasis
+        const wordFreq = {};
+        wordArray.forEach(w => {
+          if (w.length > 4) wordFreq[w] = (wordFreq[w] || 0) + 1;
+        });
+        const repeated = Object.values(wordFreq).filter(count => count >= 3).length;
+        return Math.min(1, repeated / Math.max(2, wordArray.length / 200));
+      }
+    },
+    {
+      name: 'Contrast',
+      detect: () => {
+        // Look for contrasting ideas
+        const contrasts = (text.match(/\b(but|however|unlike|versus|instead|rather|different|opposite)\b/gi) || []).length;
+        return Math.min(1, contrasts / Math.max(3, sentences.length / 5));
+      }
+    },
+    {
+      name: 'Personification',
+      detect: () => {
+        // Look for objects/animals described with human traits
+        const personification = (text.match(/\b(it|they|he|she)\s+(think|feel|know|want|believe|decide|try)\b/gi) || []).length;
+        return Math.min(1, personification / Math.max(2, sentences.length / 15));
+      }
+    },
+    {
+      name: 'Irony',
+      detect: () => {
+        // Look for ironic statements
+        const irony = (text.match(/\b(of course|naturally|obviously|perfectly|exactly)\b/gi) || []).length;
+        const sarcasm = (text.match(/\b(yeah right|sure|great|wonderful|lovely)\b/gi) || []).length;
+        return Math.min(1, (irony + sarcasm * 1.5) / Math.max(2, sentences.length / 8));
+      }
+    }
+  ];
+
+  return elements.map(element => ({
+    name: element.name,
+    score: element.detect()
+  })).sort((a, b) => b.score - a.score);
+};
+
+// Generate a summary of the comedy style
+const generateStyleSummary = (styleTags, writingElements) => {
+  const topStyles = styleTags.slice(0, 3).filter(s => s.score > 0.1);
+  const topElements = writingElements.slice(0, 3).filter(e => e.score > 0.1);
+
+  let summary = 'Your comedy style is ';
+  
+  if (topStyles.length > 0) {
+    summary += `primarily ${topStyles.map(s => s.name.toLowerCase()).join(', ')}`;
+    if (topStyles.length > 1) {
+      summary += `, with strong elements of ${topStyles[1].name.toLowerCase()}`;
+    }
+  } else {
+    summary += 'diverse and multifaceted';
+  }
+
+  if (topElements.length > 0) {
+    summary += `. Your writing shows strong use of ${topElements[0].name.toLowerCase()}`;
+    if (topElements.length > 1) {
+      summary += ` and ${topElements[1].name.toLowerCase()}`;
+    }
+  }
+
+  summary += '.';
+
+  return summary;
+};

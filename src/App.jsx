@@ -6,6 +6,7 @@ import Set from './components/Set'
 import Analysis from './components/Analysis'
 import JokeRecommendations from './components/JokeRecommendations'
 import DataManager from './components/DataManager'
+import ComedyStyle from './components/ComedyStyle'
 import Auth from './components/Auth'
 import './App.css'
 
@@ -44,6 +45,7 @@ function AppContent() {
           <Route path="/analyze" element={<ProtectedRoute><Analysis /></ProtectedRoute>} />
           <Route path="/recommendations" element={<ProtectedRoute><JokeRecommendations /></ProtectedRoute>} />
           <Route path="/data" element={<ProtectedRoute><DataManager /></ProtectedRoute>} />
+          <Route path="/comedy-style" element={<ProtectedRoute><ComedyStyle /></ProtectedRoute>} />
           <Route path="/login" element={<Auth />} />
         </Routes>
       </div>

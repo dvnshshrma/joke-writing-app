@@ -71,6 +71,15 @@ function Homepage() {
             <h2>Export / Import</h2>
             <p>Backup and restore your data</p>
           </button>
+
+          <button 
+            className="option-card style-option"
+            onClick={() => navigate('/comedy-style')}
+          >
+            <div className="option-icon">🎭</div>
+            <h2>Find your Style</h2>
+            <p>Discover your comedy style and writing elements</p>
+          </button>
         </div>
       </div>
     </div>

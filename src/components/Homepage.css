@@ -154,6 +154,16 @@
   color: white;
 }
 
+.style-option:hover {
+  background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+  color: white;
+}
+
+.style-option:hover h2,
+.style-option:hover p {
+  color: white;
+}
+
 @media (max-width: 768px) {
   .app-title {
     font-size: 2.5rem;
