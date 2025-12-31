@@ -12,18 +12,26 @@ import spacy
 import openai
 from collections import Counter
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file (if exists)
+load_dotenv()
 
 # Load spacy model (run: python -m spacy download en_core_web_sm)
 try:
     nlp = spacy.load("en_core_web_sm")
 except OSError:
-    print("Please install spacy model: python -m spacy download en_core_web_sm")
+    print("⚠️  Please install spacy model: python -m spacy download en_core_web_sm")
+    print("   This is required for NLP analysis. Falling back to basic text processing.")
     nlp = None
 
-# OpenAI API key (set via environment variable)
+# OpenAI API key (set via environment variable or .env file)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if OPENAI_API_KEY:
     openai.api_key = OPENAI_API_KEY
+else:
+    print("ℹ️  OpenAI API key not found. Using keyword-based classification instead.")
+    print("   Set OPENAI_API_KEY environment variable for more accurate style classification.")
 
 # Comedy Styles
 COMEDY_STYLES = [
