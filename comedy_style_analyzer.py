@@ -107,12 +107,40 @@ def segment_by_pauses(transcript_data: Dict, pause_threshold: float = 1.5) -> Li
     words = transcript_data.get('words', [])
     if not words:
         # Fallback: segment by sentences if no word timestamps
-        doc = nlp(transcript_data.get('text', '')) if nlp else None
-        if doc:
-            segments = []
-            for sent in doc.sents:
+        transcript_text = transcript_data.get('text', '')
+        if not transcript_text:
+            return []
+        
+        # Try using Spacy if available
+        if nlp:
+            try:
+                doc = nlp(transcript_text)
+                segments = []
+                for sent in doc.sents:
+                    segments.append(BitSegment(
+                        text=sent.text.strip(),
+                        start_time=0.0,
+                        end_time=0.0,
+                        styles=[],
+                        style_scores={},
+                        seesaw_detected=False,
+                        balloon_pop_detected=False,
+                        word_smuggling_detected=False,
+                        topper_detected=False,
+                        trimming_opportunities=[],
+                        syllable_count=sum(count_syllables(str(token)) for token in sent if token.is_alpha)
+                    ))
+                return segments
+            except Exception:
+                pass  # Fall through to basic sentence splitting
+        
+        # Basic sentence splitting (no Spacy)
+        sentences = re.split(r'[.!?]+\s+', transcript_text)
+        segments = []
+        for sent in sentences:
+            if sent.strip():
                 segments.append(BitSegment(
-                    text=sent.text.strip(),
+                    text=sent.strip(),
                     start_time=0.0,
                     end_time=0.0,
                     styles=[],
@@ -122,10 +150,9 @@ def segment_by_pauses(transcript_data: Dict, pause_threshold: float = 1.5) -> Li
                     word_smuggling_detected=False,
                     topper_detected=False,
                     trimming_opportunities=[],
-                    syllable_count=sum(count_syllables(str(token)) for token in sent)
+                    syllable_count=sum(count_syllables(word) for word in sent.split())
                 ))
-            return segments
-        return []
+        return segments
     
     segments = []
     current_segment_words = []
@@ -283,11 +310,12 @@ def detect_seesaw_theory(text: str) -> bool:
         return False
     
     # Compare setup (first part) vs punchline (last part)
-    setup_text = ' '.join(str(s) for s in sentences[:-1])
-    punchline_text = str(sentences[-1])
+    setup_text = ' '.join(sentences[:-1])
+    punchline_text = sentences[-1]
     
-    setup_syllables = sum(count_syllables(str(token)) for token in nlp(setup_text) if token.is_alpha)
-    punchline_syllables = sum(count_syllables(str(token)) for token in nlp(punchline_text) if token.is_alpha)
+    # Count syllables (works with or without Spacy)
+    setup_syllables = sum(count_syllables(word) for word in setup_text.split())
+    punchline_syllables = sum(count_syllables(word) for word in punchline_text.split())
     
     # Seesaw: setup > punchline (punchline should be shorter)
     if setup_syllables > 0 and punchline_syllables > 0:
@@ -302,7 +330,7 @@ def detect_balloon_pop(text: str) -> bool:
     Balloon Pop: Tension builds, then releases at a specific word/phrase (the reveal)
     Look for patterns: buildup phrases followed by a reveal word/phrase
     """
-    if not nlp:
+    if not text:
         return False
     
     # Patterns that indicate tension building
@@ -342,35 +370,37 @@ def detect_word_smuggling(text: str) -> bool:
     Word Smuggling: Punchline word hidden inside a casual sentence
     Look for sentences where a key word seems out of place or unexpectedly placed
     """
-    if not nlp:
+    if not text:
         return False
     
-    doc = nlp(text)
-    sentences = list(doc.sents)
+    # Split into sentences (works with or without Spacy)
+    if nlp:
+        try:
+            doc = nlp(text)
+            sentences = [str(sent) for sent in doc.sents]
+        except Exception:
+            sentences = re.split(r'[.!?]+\s+', text)
+            sentences = [s.strip() for s in sentences if s.strip()]
+    else:
+        sentences = re.split(r'[.!?]+\s+', text)
+        sentences = [s.strip() for s in sentences if s.strip()]
     
     if not sentences:
         return False
     
     # Focus on last sentence (likely punchline)
-    last_sent = sentences[-1]
+    last_sent = sentences[-1] if sentences else ""
     
-    # Look for words that seem unexpectedly placed
-    # (e.g., a noun in a place where you'd expect something else)
-    tokens = [token for token in last_sent if token.is_alpha]
-    
-    if len(tokens) < 3:
+    if len(last_sent.split()) < 3:
         return False
     
-    # Check for unusual word ordering or unexpected word types
-    # (this is a simplified heuristic - could be improved with more sophisticated parsing)
-    for i, token in enumerate(tokens[:-1]):
-        next_token = tokens[i + 1]
-        # Look for noun-noun pairs or unexpected adj-noun combinations
-        if token.pos_ == "NOUN" and next_token.pos_ == "NOUN":
-            # Might indicate smuggling
-            return True
-        # Look for unexpected adjectives before nouns
-        if token.pos_ == "ADJ" and i > 0 and tokens[i-1].pos_ not in ["DET", "ADJ"]:
+    # Basic heuristic: Look for consecutive long words (might indicate smuggling)
+    words = last_sent.split()
+    for i in range(len(words) - 1):
+        word1 = words[i].lower().replace(r'[^a-z]', '')
+        word2 = words[i + 1].lower().replace(r'[^a-z]', '')
+        # Look for consecutive medium-length words (potential unexpected pairing)
+        if 5 <= len(word1) <= 10 and 5 <= len(word2) <= 10:
             return True
     
     return False
@@ -381,19 +411,17 @@ def detect_toppers(text: str, previous_text: Optional[str] = None) -> bool:
     Toppers: Follow-up jokes on the same premise
     Compare current bit with previous bit to see if they share a premise
     """
-    if not previous_text or not nlp:
+    if not previous_text or not text:
         return False
     
-    current_doc = nlp(text)
-    previous_doc = nlp(previous_text)
+    # Extract key words (nouns - words > 4 chars, simple heuristic)
+    # Works with or without Spacy
+    current_words = {w.lower() for w in text.split() if len(w) > 4 and w.isalpha()}
+    previous_words = {w.lower() for w in previous_text.split() if len(w) > 4 and w.isalpha()}
     
-    # Extract key nouns/subjects from both
-    current_nouns = {token.lemma_.lower() for token in current_doc if token.pos_ == "NOUN" and token.is_alpha}
-    previous_nouns = {token.lemma_.lower() for token in previous_doc if token.pos_ == "NOUN" and token.is_alpha}
-    
-    # Check for overlap in key nouns
-    overlap = current_nouns & previous_nouns
-    overlap_ratio = len(overlap) / max(1, min(len(current_nouns), len(previous_nouns)))
+    # Check for overlap in key words
+    overlap = current_words & previous_words
+    overlap_ratio = len(overlap) / max(1, min(len(current_words), len(previous_words)))
     
     # If significant overlap, might be a topper
     return overlap_ratio > 0.3 and len(overlap) >= 2
@@ -404,10 +432,8 @@ def detect_trimming_opportunities(text: str) -> List[str]:
     Trimming: Identify redundant syllables/words
     Look for filler words, unnecessary qualifiers, redundant phrases
     """
-    if not nlp:
+    if not text:
         return []
-    
-    doc = nlp(text)
     opportunities = []
     
     # Common filler words/phrases
