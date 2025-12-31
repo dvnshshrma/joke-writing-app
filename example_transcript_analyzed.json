@@ -1,0 +1,53 @@
+{
+  "segments": [
+    {
+      "text": "I went to the grocery store",
+      "start_time": 0.0,
+      "end_time": 0.9,
+      "styles": [
+        "Anecdotal"
+      ],
+      "style_scores": {
+        "Anecdotal": 1.0,
+        "Clowning": 0.0,
+        "Edgy": 0.0,
+        "Fantastical": 0.0,
+        "Heartfelt": 0.0,
+        "Observational": 0.0,
+        "Opinionated": 0.0,
+        "Playful": 0.0,
+        "Puns": 0.0,
+        "Philosophical": 0.0,
+        "Sarcasm": 0.0,
+        "Satire": 0.0,
+        "Self-deprecation": 0.0,
+        "Shock": 0.0,
+        "Superiority": 0.0,
+        "Surrealism": 0.0,
+        "Tragedy": 0.0,
+        "Wordplay": 0.0
+      },
+      "seesaw_detected": false,
+      "balloon_pop_detected": false,
+      "word_smuggling_detected": true,
+      "topper_detected": false,
+      "trimming_opportunities": [],
+      "syllable_count": 7,
+      "bloom_efficiency_score": null
+    }
+  ],
+  "overall_statistics": {
+    "total_segments": 1,
+    "total_syllables": 7,
+    "most_common_styles": [
+      [
+        "Anecdotal",
+        1
+      ]
+    ],
+    "seesaw_detections": 0,
+    "balloon_pop_detections": 0,
+    "word_smuggling_detections": 1,
+    "topper_detections": 0
+  }
+}

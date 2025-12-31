@@ -297,10 +297,19 @@ function ComedyStyle() {
 
             {isAnalyzing && (
               <div className="analyzing-message">
-                <p>Transcribing and analyzing your comedy style...</p>
+                <p>🔄 Transcribing and analyzing your comedy style...</p>
                 <p className="analyzing-hint">This may take a few minutes</p>
+                <p className="analyzing-hint">Analyzing: Styles → Writing Elements → Adam Bloom Tools</p>
               </div>
             )}
+
+            <div className="api-info-box">
+              <p className="info-text">
+                💡 <strong>Tip:</strong> For more accurate style classification, add an OpenAI API key to your server environment variables (OPENAI_API_KEY).
+                <br />
+                The analyzer will use keyword-based classification otherwise (still works great!).
+              </p>
+            </div>
           </div>
         </div>
       ) : (

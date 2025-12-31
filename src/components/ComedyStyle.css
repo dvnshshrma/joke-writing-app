@@ -184,6 +184,25 @@
   margin-top: 0.5rem;
 }
 
+.api-info-box {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: #f0f7ff;
+  border: 1px solid #b3d9ff;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.info-text {
+  margin: 0;
+  color: #555;
+  line-height: 1.6;
+}
+
+.info-text strong {
+  color: #333;
+}
+
 /* Results Styles */
 .style-results {
   max-width: 1200px;

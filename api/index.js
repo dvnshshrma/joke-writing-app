@@ -1231,7 +1231,10 @@ const countSyllables = (word) => {
 
 // OpenAI zero-shot classification for comedy styles (optional enhancement)
 const classifyStylesWithOpenAI = async (transcriptText) => {
-  if (!OPENAI_API_KEY || !transcriptText) return null;
+  if (!OPENAI_API_KEY || !transcriptText) {
+    console.log('Skipping OpenAI classification: missing key or empty transcript');
+    return null;
+  }
   
   try {
     const COMEDY_STYLES_LIST = [
@@ -1241,6 +1244,13 @@ const classifyStylesWithOpenAI = async (transcriptText) => {
       'Surrealism', 'Tragedy', 'Wordplay'
     ];
     
+    // Truncate transcript if too long (OpenAI has token limits)
+    const maxLength = 2000; // ~500 words
+    const truncatedText = transcriptText.length > maxLength 
+      ? transcriptText.substring(0, maxLength) + '...'
+      : transcriptText;
+    
+    console.log('Calling OpenAI API for style classification...');
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -1252,11 +1262,11 @@ const classifyStylesWithOpenAI = async (transcriptText) => {
         messages: [
           {
             role: 'system',
-            content: 'You are an expert comedy analyst. Return only valid JSON with style names as keys and scores (0.0-1.0) as values.'
+            content: 'You are an expert comedy analyst. Return only valid JSON with style names as keys and scores (0.0-1.0) as values. Do not include any explanations, only the JSON object.'
           },
           {
             role: 'user',
-            content: `Analyze this comedy bit and classify which comedy styles apply (0.0-1.0):\n\n"${transcriptText.substring(0, 500)}"\n\nStyles: ${COMEDY_STYLES_LIST.join(', ')}\n\nReturn JSON: {"StyleName": score, ...}`
+            content: `Analyze this comedy bit and classify which comedy styles apply. Rate each style from 0.0 to 1.0 based on how strongly it applies:\n\n"${truncatedText}"\n\nAvailable styles: ${COMEDY_STYLES_LIST.join(', ')}\n\nReturn a JSON object where keys are style names and values are scores (0.0-1.0). Example format: {"Observational": 0.9, "Sarcasm": 0.7, "Self-deprecation": 0.5}`
           }
         ],
         temperature: 0.3,
@@ -1264,23 +1274,41 @@ const classifyStylesWithOpenAI = async (transcriptText) => {
       })
     });
     
-    if (!response.ok) return null;
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error('OpenAI API error:', response.status, errorData);
+      return null;
+    }
     
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content;
-    if (!content) return null;
+    if (!content) {
+      console.error('OpenAI API returned empty content');
+      return null;
+    }
     
-    // Extract JSON from response
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    // Extract JSON from response (handle markdown code blocks)
+    let jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      // Try to find JSON in code blocks
+      jsonMatch = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+      if (jsonMatch) jsonMatch = [jsonMatch[1]];
+    }
+    
     if (jsonMatch) {
       const scores = JSON.parse(jsonMatch[0]);
-      return COMEDY_STYLES_LIST.map(style => ({
+      const result = COMEDY_STYLES_LIST.map(style => ({
         name: style,
         score: Math.min(1, Math.max(0, parseFloat(scores[style] || 0)))
       }));
+      console.log('✅ OpenAI classification successful');
+      return result;
+    } else {
+      console.error('Could not extract JSON from OpenAI response:', content.substring(0, 200));
     }
   } catch (err) {
-    console.log('OpenAI classification error:', err.message);
+    console.error('OpenAI classification error:', err.message);
+    // Don't throw - fall back to keyword-based classification
   }
   
   return null;
