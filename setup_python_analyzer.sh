@@ -9,16 +9,38 @@ echo ""
 
 # Check Python version
 echo "1. Checking Python installation..."
-if command -v python3 &> /dev/null; then
+if command -v python3.12 &> /dev/null; then
+    PYTHON_VERSION=$(python3.12 --version)
+    echo "   ✅ Found: $PYTHON_VERSION (recommended)"
+    PYTHON_CMD="python3.12"
+elif command -v python3.11 &> /dev/null; then
+    PYTHON_VERSION=$(python3.11 --version)
+    echo "   ✅ Found: $PYTHON_VERSION (recommended)"
+    PYTHON_CMD="python3.11"
+elif command -v python3 &> /dev/null; then
     PYTHON_VERSION=$(python3 --version)
-    echo "   ✅ Found: $PYTHON_VERSION"
+    PYTHON_MAJOR=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    if (( $(echo "$PYTHON_MAJOR >= 3.14" | bc -l 2>/dev/null || echo "0") )); then
+        echo "   ⚠️  Found: $PYTHON_VERSION"
+        echo "   ⚠️  WARNING: Python 3.14+ may have compatibility issues with Spacy"
+        echo "   💡 Recommended: Use Python 3.11 or 3.12 for best compatibility"
+        read -p "   Continue anyway? (y/n): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "   Please install Python 3.11 or 3.12 and run this script again"
+            exit 1
+        fi
+    else
+        echo "   ✅ Found: $PYTHON_VERSION"
+    fi
     PYTHON_CMD="python3"
 elif command -v python &> /dev/null; then
     PYTHON_VERSION=$(python --version)
     echo "   ✅ Found: $PYTHON_VERSION"
     PYTHON_CMD="python"
 else
-    echo "   ❌ Python not found. Please install Python 3.8+ from python.org"
+    echo "   ❌ Python not found. Please install Python 3.8-3.13 from python.org"
+    echo "   💡 Recommended: Python 3.11 or 3.12 for best compatibility"
     exit 1
 fi
 

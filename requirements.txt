@@ -1,3 +1,5 @@
+# Note: Use Python 3.8-3.13 for full compatibility
+# Python 3.14+ may have compatibility issues with Spacy/Pydantic
 spacy>=3.7.0
 openai>=1.0.0
 python-dotenv>=1.0.0

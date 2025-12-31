@@ -18,11 +18,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Load spacy model (run: python -m spacy download en_core_web_sm)
+# Note: Spacy may not be compatible with Python 3.14+. Use Python 3.8-3.13 for best results.
+nlp = None
 try:
     nlp = spacy.load("en_core_web_sm")
-except OSError:
-    print("⚠️  Please install spacy model: python -m spacy download en_core_web_sm")
-    print("   This is required for NLP analysis. Falling back to basic text processing.")
+except (OSError, ImportError, Exception) as e:
+    print("⚠️  Spacy not available or model not found.")
+    print(f"   Error: {str(e)}")
+    print("   Falling back to basic text processing (syllable counting and keyword matching).")
+    print("   For full NLP features, use Python 3.8-3.13 and install: python -m spacy download en_core_web_sm")
     nlp = None
 
 # OpenAI API key (set via environment variable or .env file)

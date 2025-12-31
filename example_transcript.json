@@ -1,0 +1,11 @@
+{
+  "text": "I went to the grocery store the other day, and I noticed something weird. People are buying way too much toilet paper. Like, are you planning on hosting a party for your digestive system? Then I realized, wait, I'm also buying a lot of toilet paper. I'm part of the problem! That's when it hit me - self-awareness is just realizing you're the main character in your own sitcom.",
+  "words": [
+    {"text": "I", "start": 0, "end": 50},
+    {"text": "went", "start": 50, "end": 200},
+    {"text": "to", "start": 200, "end": 250},
+    {"text": "the", "start": 250, "end": 300},
+    {"text": "grocery", "start": 300, "end": 600},
+    {"text": "store", "start": 600, "end": 900}
+  ]
+}
