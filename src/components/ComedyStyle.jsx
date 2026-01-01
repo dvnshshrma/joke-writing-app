@@ -47,6 +47,8 @@ function ComedyStyle() {
   const navigate = useNavigate()
   const [audioFile, setAudioFile] = useState(null)
   const [audioFileName, setAudioFileName] = useState('')
+  const [transcriptText, setTranscriptText] = useState('')
+  const [inputMode, setInputMode] = useState('audio') // 'audio' or 'transcript'
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisResult, setAnalysisResult] = useState(null)
   const [error, setError] = useState(null)
@@ -301,35 +303,89 @@ function ComedyStyle() {
       {!analysisResult ? (
         <div className="style-upload-section">
           <div className="upload-card">
-            <h2>Upload Your Comedy Set</h2>
+            <h2>Analyze Your Comedy Set</h2>
             <p className="upload-description">
-              Upload an audio or video recording of your comedy set. We'll analyze your style and identify key writing elements.
+              Choose how you'd like to analyze your comedy style. Upload an audio/video file or paste your transcript directly.
             </p>
 
-            <div className="file-upload-area">
-              <input
-                type="file"
-                id="audio-upload"
-                accept="audio/*,video/*"
-                onChange={handleFileSelect}
-                className="file-input"
+            {/* Input Mode Selector */}
+            <div className="input-mode-selector">
+              <button
+                className={`mode-button ${inputMode === 'audio' ? 'active' : ''}`}
+                onClick={() => {
+                  setInputMode('audio')
+                  setTranscriptText('')
+                  setError(null)
+                }}
                 disabled={isAnalyzing}
-              />
-              <label htmlFor="audio-upload" className="file-label">
-                {audioFile ? (
-                  <div className="file-selected">
-                    <span className="file-icon">🎤</span>
-                    <span className="file-name">{audioFileName}</span>
-                  </div>
-                ) : (
-                  <div className="file-placeholder">
-                    <span className="upload-icon">📁</span>
-                    <span>Click to upload audio or video file</span>
-                    <span className="file-hint">MP3, WAV, M4A, MP4, MOV, WEBM</span>
-                  </div>
-                )}
-              </label>
+              >
+                🎤 Audio/Video Upload
+              </button>
+              <button
+                className={`mode-button ${inputMode === 'transcript' ? 'active' : ''}`}
+                onClick={() => {
+                  setInputMode('transcript')
+                  setAudioFile(null)
+                  setAudioFileName('')
+                  setError(null)
+                }}
+                disabled={isAnalyzing}
+              >
+                📝 Paste Transcript
+              </button>
             </div>
+
+            {/* Audio/Video Upload Option */}
+            {inputMode === 'audio' && (
+              <div className="file-upload-area">
+                <input
+                  type="file"
+                  id="audio-upload"
+                  accept="audio/*,video/*"
+                  onChange={handleFileSelect}
+                  className="file-input"
+                  disabled={isAnalyzing}
+                />
+                <label htmlFor="audio-upload" className="file-label">
+                  {audioFile ? (
+                    <div className="file-selected">
+                      <span className="file-icon">🎤</span>
+                      <span className="file-name">{audioFileName}</span>
+                    </div>
+                  ) : (
+                    <div className="file-placeholder">
+                      <span className="upload-icon">📁</span>
+                      <span>Click to upload audio or video file</span>
+                      <span className="file-hint">MP3, WAV, M4A, MP4, MOV, WEBM</span>
+                    </div>
+                  )}
+                </label>
+              </div>
+            )}
+
+            {/* Transcript Text Input Option */}
+            {inputMode === 'transcript' && (
+              <div className="transcript-input-area">
+                <label htmlFor="transcript-text" className="transcript-label">
+                  Paste your comedy set transcript below:
+                </label>
+                <textarea
+                  id="transcript-text"
+                  className="transcript-textarea"
+                  value={transcriptText}
+                  onChange={(e) => {
+                    setTranscriptText(e.target.value)
+                    setError(null)
+                  }}
+                  placeholder="Paste your comedy set transcript here... We'll analyze your style, writing elements, and identify Adam Bloom's comedy tools."
+                  disabled={isAnalyzing}
+                  rows={10}
+                />
+                <div className="transcript-hint">
+                  💡 Tip: Paste the full transcript of your comedy set for best results
+                </div>
+              </div>
+            )}
 
             {error && (
               <div className="error-message">
@@ -340,7 +396,7 @@ function ComedyStyle() {
             <button
               className="analyze-btn"
               onClick={handleAnalyze}
-              disabled={!audioFile || isAnalyzing}
+              disabled={(inputMode === 'audio' && !audioFile) || (inputMode === 'transcript' && !transcriptText.trim()) || isAnalyzing}
             >
               {isAnalyzing ? '🔄 Analyzing...' : '🎭 Analyze My Style'}
             </button>

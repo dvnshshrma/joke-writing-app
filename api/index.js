@@ -1202,6 +1202,51 @@ export default async function handler(req, res) {
     }
 
     // COMEDY STYLE ANALYSIS ENDPOINTS
+    // Direct text analysis (no AssemblyAI needed)
+    if (path === '/comedy-style/analyze-text' || path === '/comedy-style/analyze-text/') {
+      if (method === 'POST') {
+        const { transcriptText } = body || {};
+        
+        if (!transcriptText || !transcriptText.trim()) {
+          return res.status(400).json({ error: 'transcriptText is required' });
+        }
+
+        try {
+          // Analyze transcript directly (no words array, but analysis functions handle this)
+          const styleTags = await analyzeComedyStyles(transcriptText);
+          const writingElements = analyzeWritingElements(transcriptText, []); // Empty words array for direct text
+          const bloomTools = analyzeAdamBloomTools(transcriptText, []); // Empty words array
+          const summary = generateStyleSummary(styleTags, writingElements, bloomTools);
+
+          // Truncate transcript if too long
+          const MAX_TRANSCRIPT_LENGTH = 5000;
+          const transcriptPreview = transcriptText.length > MAX_TRANSCRIPT_LENGTH
+            ? transcriptText.substring(0, MAX_TRANSCRIPT_LENGTH) + '... (truncated)'
+            : transcriptText;
+
+          return res.json({
+            status: 'completed',
+            result: {
+              styleTags,
+              writingElements,
+              bloomTools,
+              summary,
+              transcriptText: transcriptPreview,
+              transcriptLength: transcriptText.length,
+              wordCount: transcriptText.split(/\s+/).length
+            }
+          });
+        } catch (error) {
+          console.error('Error analyzing transcript text:', error);
+          return res.status(500).json({ 
+            status: 'failed',
+            error: error.message || 'Failed to analyze transcript' 
+          });
+        }
+      }
+    }
+
+    // Audio/video analysis (uses AssemblyAI)
     if (path === '/comedy-style/analyze' || path === '/comedy-style/analyze/') {
       if (method === 'POST') {
         const { fileName, storageBucket, storagePath } = body || {};
