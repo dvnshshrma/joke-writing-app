@@ -165,15 +165,9 @@ function ComedyStyle() {
       return
     }
 
-    // Check file size (Vercel/Supabase limits)
-    const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB (conservative limit)
+    // Note: File size limit removed - FFmpeg.wasm can handle large video files
+    // Videos will be converted to audio (much smaller MP3 files) before upload
     const fileSizeMB = file.size / (1024 * 1024)
-    
-    if (file.size > MAX_FILE_SIZE) {
-      alert(`File is too large (${fileSizeMB.toFixed(2)}MB). Maximum size is 100MB. Please use a smaller file or compress it.`);
-      setError(`File too large: ${fileSizeMB.toFixed(2)}MB. Maximum: 100MB`);
-      return;
-    }
 
     // Handle video files - convert to audio if enabled or if file is large
     if (isVideo || hasVideoExt) {
@@ -511,7 +505,7 @@ function ComedyStyle() {
                     <span><strong>Convert video to audio (recommended)</strong></span>
                   </label>
                   <p>
-                    Videos will be converted to high-quality MP3 audio for better analysis. Large videos (&gt;50MB) are automatically converted.
+                    Videos will be converted to high-quality MP3 audio for better analysis. Large videos (&gt;50MB) are automatically converted. No file size limit - FFmpeg handles large files efficiently.
                   </p>
                 </div>
 

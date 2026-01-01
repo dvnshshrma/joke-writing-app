@@ -589,7 +589,7 @@ function Analysis() {
                       <span className="upload-icon">📁</span>
                       <p>Click to upload audio or video file</p>
                       <p className="upload-hint">Audio: MP3, WAV, M4A, OGG • Video: MP4, MOV, WEBM</p>
-                      <p className="upload-hint">Max 1GB • Videos over 1GB will be converted to audio</p>
+                      <p className="upload-hint">No file size limit • Videos will be converted to high-quality MP3 audio</p>
                     </div>
                   )}
                 </label>
