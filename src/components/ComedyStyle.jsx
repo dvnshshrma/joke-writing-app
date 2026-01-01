@@ -101,8 +101,13 @@ function ComedyStyle() {
   }
 
   const handleAnalyze = async () => {
-    if (!audioFile) {
+    if (inputMode === 'audio' && !audioFile) {
       alert('Please upload an audio file')
+      return
+    }
+    
+    if (inputMode === 'transcript' && !transcriptText.trim()) {
+      alert('Please paste your transcript')
       return
     }
 
@@ -115,6 +120,32 @@ function ComedyStyle() {
       // Check if we're in production (same-origin) - use JSON + storage upload
       const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
       
+      // Handle transcript text input (direct analysis, no AssemblyAI needed)
+      if (inputMode === 'transcript') {
+        const apiUrl = isProduction ? '/api' : 'http://localhost:3001/api'
+        const response = await fetch(`${apiUrl}/comedy-style/analyze-text`, {
+          method: 'POST',
+          headers: {
+            ...headers,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            transcriptText: transcriptText.trim()
+          })
+        })
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: 'Failed to analyze transcript' }))
+          throw new Error(errorData.error || `HTTP error! status: ${response.status}`)
+        }
+        
+        const result = await response.json()
+        console.log('Transcript analysis completed:', result)
+        setAnalysisResult(result.result || result)
+        return
+      }
+      
+      // Handle audio/video file upload (existing logic)
       if (isProduction && supabase) {
         // Upload to Supabase Storage first (same as analysis)
         const { data: { user } } = await supabase.auth.getUser()
