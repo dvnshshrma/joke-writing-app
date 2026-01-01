@@ -51,7 +51,7 @@ const buildMockJokeMetrics = async ({ user, setName }) => {
   try {
     if (user) {
       const { data } = await supabase
-        .from('jokes')
+      .from('jokes')
         .select('header')
         .eq('user_id', user.id)
         .order('updated_at', { ascending: false })
@@ -350,19 +350,31 @@ const segmentTranscriptIntoJokes = (words = [], transcriptText = '', chapters = 
 };
 
 // Match transcript segments to user's saved jokes using similarity
-const matchSegmentsToJokes = (segments, savedJokes, stopWords) => {
-  if (!savedJokes || savedJokes.length === 0) return segments.map(s => ({ ...s, matchedHeader: null, similarity: 0 }));
+const matchSegmentsToJokes = async (segments, savedJokes, stopWords) => {
+  if (!savedJokes || savedJokes.length === 0) {
+    // No saved jokes - generate headers with AI for all segments
+    const segmentsWithHeaders = await Promise.all(segments.map(async (segment) => {
+      const aiHeader = await generateJokeHeaderWithAI(segment.text || '');
+      return {
+        ...segment,
+        matchedHeader: aiHeader || extractSegmentTopic(segment.text || '', stopWords),
+        similarity: 0,
+        isAIGenerated: !!aiHeader
+      };
+    }));
+    return segmentsWithHeaders;
+  }
   
   // Build vectors for all saved jokes
   const jokeVectors = savedJokes.map(joke => ({
-    id: joke.id,
+      id: joke.id,
     header: joke.header || 'Untitled',
     vector: buildTextVector(extractJokeText(joke), stopWords),
     text: extractJokeText(joke)
   }));
   
-  // Match each segment to the most similar joke
-  return segments.map(segment => {
+  // Match each segment to the most similar joke, with AI fallback
+  const matchedSegments = await Promise.all(segments.map(async (segment) => {
     const segmentVector = buildTextVector(segment.text || '', stopWords);
     let bestMatch = null;
     let bestSimilarity = 0;
@@ -381,21 +393,81 @@ const matchSegmentsToJokes = (segments, savedJokes, stopWords) => {
         ...segment,
         matchedHeader: bestMatch.header,
         similarity: bestSimilarity,
-        matchedJokeId: bestMatch.id
+        matchedJokeId: bestMatch.id,
+        isAIGenerated: false
       };
     } else {
-      // No good match, extract topic from segment text
+      // No good match - use AI to generate header
+      const aiHeader = await generateJokeHeaderWithAI(segment.text || '');
       return {
         ...segment,
-        matchedHeader: null,
+        matchedHeader: aiHeader || extractSegmentTopic(segment.text || '', stopWords),
         similarity: bestSimilarity,
-        extractedTopic: extractSegmentTopic(segment.text || '', stopWords)
+        isAIGenerated: !!aiHeader
       };
     }
-  });
+  }));
+  
+  return matchedSegments;
 };
 
-// Extract a topic/title from a text segment
+// Generate a joke header using AI (OpenAI)
+const generateJokeHeaderWithAI = async (segmentText) => {
+  if (!OPENAI_API_KEY || !segmentText || segmentText.trim().length < 10) {
+    return null;
+  }
+
+  try {
+    // Truncate if too long (OpenAI token limit)
+    const maxLength = 500; // ~125 words
+    const truncatedText = segmentText.length > maxLength
+      ? segmentText.substring(0, maxLength) + '...'
+      : segmentText;
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an expert comedy writer. Generate a concise, catchy header/title (2-5 words) that captures the main topic or punchline of this comedy bit. Return only the header text, nothing else. Do not use quotes or extra formatting.'
+          },
+          {
+            role: 'user',
+            content: `Generate a brief header for this comedy bit:\n\n"${truncatedText}"\n\nHeader (2-5 words):`
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 20 // Short headers only
+      })
+    });
+
+    if (!response.ok) {
+      console.error('OpenAI API error generating header:', response.status);
+      return null;
+    }
+
+    const data = await response.json();
+    const header = data.choices?.[0]?.message?.content?.trim();
+    
+    if (header) {
+      // Clean up any quotes or extra formatting
+      return header.replace(/^["']|["']$/g, '').trim();
+    }
+  } catch (err) {
+    console.error('Error generating header with AI:', err.message);
+    // Fall back to keyword extraction
+  }
+
+  return null;
+};
+
+// Extract a topic/title from a text segment (fallback when AI unavailable)
 const extractSegmentTopic = (text, stopWords) => {
   if (!text || text.trim().length < 10) return null;
   
@@ -548,8 +620,8 @@ const buildJokeMetricsFromTranscript = async ({ user, transcriptText, jobWords =
     }));
   }
 
-  // Match segments to saved jokes using similarity
-  const matchedSegments = matchSegmentsToJokes(segments, savedJokes, stopWords);
+  // Match segments to saved jokes using similarity (with AI header generation for unmatched segments)
+  const matchedSegments = await matchSegmentsToJokes(segments, savedJokes, stopWords);
 
   // Convert to joke metrics format
   return matchedSegments.map((segment, i) => {
@@ -646,21 +718,21 @@ export default async function handler(req, res) {
       
       if (method === 'POST') {
         const { id, header, sections, isDraft, comments, strikethroughTexts, replacements, isOneLiner } = body;
-        const jokeDoc = {
-          id,
-          header: header || '',
-          sections: sections || [],
-          is_draft: isDraft !== false,
+    const jokeDoc = {
+      id,
+      header: header || '',
+      sections: sections || [],
+      is_draft: isDraft !== false,
           is_one_liner: isOneLiner || false,
-          comments: comments || {},
-          strikethrough_texts: strikethroughTexts || [],
-          replacements: replacements || {},
+      comments: comments || {},
+      strikethrough_texts: strikethroughTexts || [],
+      replacements: replacements || {},
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           user_id: user?.id || null
         };
         const { error } = await supabaseAdmin.from('jokes').insert([jokeDoc]);
-        if (error) throw error;
+    if (error) throw error;
         return res.json({ message: 'Joke created', id });
       }
     }
