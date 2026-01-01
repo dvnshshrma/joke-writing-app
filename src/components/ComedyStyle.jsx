@@ -499,19 +499,36 @@ function ComedyStyle() {
             {/* Audio/Video Upload Option */}
             {inputMode === 'audio' && (
               <div className="file-upload-area">
+                {/* Video conversion toggle */}
+                <div className="video-conversion-option">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={convertVideoToAudio}
+                      onChange={(e) => setConvertVideoToAudio(e.target.checked)}
+                      disabled={isConverting || isAnalyzing}
+                    />
+                    <span><strong>Convert video to audio (recommended)</strong></span>
+                  </label>
+                  <p>
+                    Videos will be converted to high-quality MP3 audio for better analysis. Large videos (&gt;50MB) are automatically converted.
+                  </p>
+                </div>
+
                 <input
                   type="file"
                   id="audio-upload"
                   accept="audio/*,video/*"
                   onChange={handleFileSelect}
                   className="file-input"
-                  disabled={isAnalyzing}
+                  disabled={isAnalyzing || isConverting}
                 />
                 <label htmlFor="audio-upload" className="file-label">
                   {audioFile ? (
                     <div className="file-selected">
-                      <span className="file-icon">🎤</span>
+                      <span className="file-icon">{mediaType === 'video' ? '🎬' : '🎤'}</span>
                       <span className="file-name">{audioFileName}</span>
+                      {mediaType === 'video' && <span style={{ fontSize: '0.85rem', color: '#666', marginLeft: '0.5rem' }}>(Video)</span>}
                     </div>
                   ) : (
                     <div className="file-placeholder">
@@ -521,6 +538,30 @@ function ComedyStyle() {
                     </div>
                   )}
                 </label>
+
+                {/* Conversion status */}
+                {isConverting && (
+                  <div className="conversion-status converting">
+                    <span className="spinner">🔄</span>
+                    <p>{conversionMessage || 'Converting video to audio...'}</p>
+                    {conversionProgress > 0 && (
+                      <div className="conversion-progress">
+                        <div className="progress-bar">
+                          <div 
+                            className="progress-fill" 
+                            style={{ width: `${conversionProgress}%` }}
+                          ></div>
+                        </div>
+                        <span className="progress-text">{conversionProgress}%</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {conversionMessage && !isConverting && (
+                  <div className={`conversion-status ${conversionMessage.includes('✅') ? 'success' : conversionMessage.includes('❌') ? 'error' : 'info'}`}>
+                    <p>{conversionMessage}</p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -557,7 +598,7 @@ function ComedyStyle() {
             <button
               className="analyze-btn"
               onClick={handleAnalyze}
-              disabled={(inputMode === 'audio' && !audioFile) || (inputMode === 'transcript' && !transcriptText.trim()) || isAnalyzing}
+                  disabled={(inputMode === 'audio' && !audioFile) || (inputMode === 'transcript' && !transcriptText.trim()) || isAnalyzing || isConverting}
             >
               {isAnalyzing ? '🔄 Analyzing...' : '🎭 Analyze My Style'}
             </button>
