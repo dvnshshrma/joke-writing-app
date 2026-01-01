@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { FFmpeg } from '@ffmpeg/ffmpeg'
+import { fetchFile, toBlobURL } from '@ffmpeg/util'
 import { supabase } from '../lib/supabase'
 import './ComedyStyle.css'
 
@@ -52,6 +54,95 @@ function ComedyStyle() {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisResult, setAnalysisResult] = useState(null)
   const [error, setError] = useState(null)
+  const [isConverting, setIsConverting] = useState(false)
+  const [conversionMessage, setConversionMessage] = useState(null)
+  const [conversionProgress, setConversionProgress] = useState(0)
+  const [mediaType, setMediaType] = useState(null) // 'audio' or 'video'
+  const [convertVideoToAudio, setConvertVideoToAudio] = useState(true)
+  const ffmpegRef = useRef(null)
+  const ffmpegLoadedRef = useRef(false)
+
+  // Load FFmpeg.wasm (only once)
+  const loadFFmpeg = async () => {
+    if (ffmpegLoadedRef.current && ffmpegRef.current) {
+      return ffmpegRef.current
+    }
+
+    const ffmpeg = new FFmpeg()
+    ffmpegRef.current = ffmpeg
+
+    // Progress tracking
+    ffmpeg.on('progress', ({ progress }) => {
+      setConversionProgress(Math.round(progress * 100))
+    })
+
+    try {
+      // Load FFmpeg.wasm core files from CDN
+      const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm'
+      
+      setConversionMessage('Loading FFmpeg...')
+      await ffmpeg.load({
+        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+      })
+      
+      ffmpegLoadedRef.current = true
+      return ffmpeg
+    } catch (error) {
+      console.error('Failed to load FFmpeg:', error)
+      throw new Error('Failed to load FFmpeg. Please try again or use a smaller file.')
+    }
+  }
+
+  // Extract audio from video using FFmpeg.wasm (high-quality conversion)
+  const extractAudioFromVideo = async (videoFile) => {
+    try {
+      // Load FFmpeg if not already loaded
+      const ffmpeg = await loadFFmpeg()
+      
+      setConversionMessage('Processing video...')
+      setConversionProgress(0)
+
+      // Generate unique filenames
+      const inputFileName = `input.${videoFile.name.split('.').pop()}`
+      const outputFileName = 'output.mp3'
+
+      // Write input file to FFmpeg virtual file system
+      setConversionMessage('Reading video file...')
+      await ffmpeg.writeFile(inputFileName, await fetchFile(videoFile))
+
+      // Convert video to high-quality MP3 audio
+      setConversionMessage('Converting to audio (this may take a while)...')
+      await ffmpeg.exec([
+        '-i', inputFileName,
+        '-vn', // No video
+        '-acodec', 'libmp3lame', // MP3 codec
+        '-ac', '2', // Stereo
+        '-ar', '44100', // 44.1kHz sample rate
+        '-b:a', '192k', // 192 kbps bitrate (high quality)
+        '-q:a', '2', // High quality VBR encoding
+        outputFileName
+      ])
+
+      // Read output file
+      setConversionMessage('Finalizing audio...')
+      const data = await ffmpeg.readFile(outputFileName)
+      
+      // Clean up virtual files
+      await ffmpeg.deleteFile(inputFileName)
+      await ffmpeg.deleteFile(outputFileName)
+
+      // Create blob from output
+      const audioBlob = new Blob([data], { type: 'audio/mpeg' })
+      
+      setConversionProgress(100)
+      return audioBlob
+
+    } catch (error) {
+      console.error('FFmpeg conversion error:', error)
+      throw new Error(`Conversion failed: ${error.message}. Try a smaller file or different format.`)
+    }
+  }
 
   const handleFileSelect = async (e) => {
     const file = e.target.files[0]
@@ -75,13 +166,52 @@ function ComedyStyle() {
     }
 
     // Check file size (Vercel/Supabase limits)
-    // Supabase free tier: 50MB per file, Vercel: 4.5MB request body (but we upload to storage)
     const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB (conservative limit)
+    const fileSizeMB = file.size / (1024 * 1024)
+    
     if (file.size > MAX_FILE_SIZE) {
-      const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
-      alert(`File is too large (${sizeMB}MB). Maximum size is 100MB. Please use a smaller file or compress it.`);
-      setError(`File too large: ${sizeMB}MB. Maximum: 100MB`);
+      alert(`File is too large (${fileSizeMB.toFixed(2)}MB). Maximum size is 100MB. Please use a smaller file or compress it.`);
+      setError(`File too large: ${fileSizeMB.toFixed(2)}MB. Maximum: 100MB`);
       return;
+    }
+
+    // Handle video files - convert to audio if enabled or if file is large
+    if (isVideo || hasVideoExt) {
+      const shouldConvert = fileSizeMB > 50 || convertVideoToAudio // Convert if >50MB or user enabled
+      
+      if (shouldConvert) {
+        setIsConverting(true)
+        setError(null)
+        setConversionProgress(0)
+        
+        try {
+          const audioBlob = await extractAudioFromVideo(file)
+          const audioFile = new File([audioBlob], file.name.replace(/\.[^/.]+$/, '.mp3'), { type: 'audio/mpeg' })
+          
+          setAudioFile(audioFile)
+          setAudioFileName(audioFile.name)
+          setMediaType('audio')
+          setConversionMessage(`✅ Converted to high-quality MP3 audio (${(audioFile.size / (1024 * 1024)).toFixed(1)}MB)`)
+          setConversionProgress(0)
+        } catch (error) {
+          console.error('Error converting video:', error)
+          setConversionMessage(`❌ ${error.message || 'Conversion failed. Try a smaller file or audio format.'}`)
+          setConversionProgress(0)
+          setAudioFile(null)
+          setError(error.message || 'Video conversion failed')
+        } finally {
+          setIsConverting(false)
+        }
+        return
+      } else {
+        // Video file, but conversion disabled and file is small enough
+        setMediaType('video')
+        setConversionMessage('ℹ️ Large videos can fail to upload. Enable conversion for better reliability.')
+      }
+    } else {
+      // Audio file - no conversion needed
+      setMediaType('audio')
+      setConversionMessage(null)
     }
 
     setAudioFile(file)
