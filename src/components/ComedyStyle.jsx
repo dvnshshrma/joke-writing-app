@@ -169,9 +169,10 @@ function ComedyStyle() {
     // Videos will be converted to audio (much smaller MP3 files) before upload
     const fileSizeMB = file.size / (1024 * 1024)
 
-    // Handle video files - convert to audio if enabled or if file is large
+    // Handle video files - convert to audio if user has enabled conversion
+    // FFmpeg.wasm handles any size efficiently, so we respect user preference only
     if (isVideo || hasVideoExt) {
-      const shouldConvert = fileSizeMB > 50 || convertVideoToAudio // Convert if >50MB or user enabled
+      const shouldConvert = convertVideoToAudio
       
       if (shouldConvert) {
         setIsConverting(true)
@@ -505,7 +506,7 @@ function ComedyStyle() {
                     <span><strong>Convert video to audio (recommended)</strong></span>
                   </label>
                   <p>
-                    Videos will be converted to high-quality MP3 audio for better analysis. Large videos (&gt;50MB) are automatically converted. No file size limit - FFmpeg handles large files efficiently.
+                    Videos will be converted to high-quality MP3 audio for better analysis. No file size limit - FFmpeg handles large files efficiently.
                   </p>
                 </div>
 
