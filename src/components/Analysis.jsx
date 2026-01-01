@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { FFmpeg } from '@ffmpeg/ffmpeg'
+import { fetchFile, toBlobURL } from '@ffmpeg/util'
 import { setsAPI } from '../services/setsAPI'
 import { analysisAPI } from '../services/analysisAPI'
 import './Analysis.css'
@@ -21,7 +23,10 @@ function Analysis() {
   const [mediaType, setMediaType] = useState(null) // 'audio' or 'video'
   const [isConverting, setIsConverting] = useState(false) // For video to audio conversion
   const [conversionMessage, setConversionMessage] = useState(null)
+  const [conversionProgress, setConversionProgress] = useState(0) // Progress percentage
   const [convertVideoToAudio, setConvertVideoToAudio] = useState(true) // user-controlled (recommended)
+  const ffmpegRef = useRef(null)
+  const ffmpegLoadedRef = useRef(false)
 
   useEffect(() => {
     loadRecentAnalyses()
@@ -121,18 +126,20 @@ function Analysis() {
           
           try {
             const audioBlob = await extractAudioFromVideo(file)
-            const audioFile = new File([audioBlob], file.name.replace(/\.[^/.]+$/, '.webm'), { type: 'audio/webm' })
+            const audioFile = new File([audioBlob], file.name.replace(/\.[^/.]+$/, '.mp3'), { type: 'audio/mpeg' })
             
             setAudioFile(audioFile)
             setMediaFile(audioFile)
             setMediaType('audio')
-            setConversionMessage(`✅ Converted to audio (${(audioFile.size / (1024 * 1024)).toFixed(1)}MB)`)
+            setConversionMessage(`✅ Converted to high-quality MP3 audio (${(audioFile.size / (1024 * 1024)).toFixed(1)}MB)`)
+            setConversionProgress(0)
             
             const duration = await getMediaDuration(audioFile, false)
             setAudioDuration(duration)
           } catch (error) {
             console.error('Error converting video:', error)
-            setConversionMessage('❌ Conversion failed. Try a smaller file or audio format.')
+            setConversionMessage(`❌ ${error.message || 'Conversion failed. Try a smaller file or audio format.'}`)
+            setConversionProgress(0)
             setAudioFile(null)
           } finally {
             setIsConverting(false)
@@ -163,75 +170,90 @@ function Analysis() {
     }
   }
 
-  // Extract audio from video using MediaRecorder
-  const extractAudioFromVideo = async (videoFile) => {
-    return new Promise((resolve, reject) => {
-      const video = document.createElement('video')
-      video.src = URL.createObjectURL(videoFile)
-      // Keep muted to avoid feedback / autoplay blocks; we only need the audio track for recording.
-      video.muted = true
-      
-      video.onloadedmetadata = async () => {
-        try {
-          // Create audio context
-          const audioContext = new (window.AudioContext || window.webkitAudioContext)()
-          const source = audioContext.createMediaElementSource(video)
-          const destination = audioContext.createMediaStreamDestination()
-          source.connect(destination)
-          // Do NOT connect to speakers; just record.
-          
-          // Set up MediaRecorder for audio
-          const mediaRecorder = new MediaRecorder(destination.stream, {
-            mimeType: 'audio/webm;codecs=opus',
-            // Keep bitrate low so even large videos become small audio files (best-effort, browser may ignore)
-            audioBitsPerSecond: 24000
-          })
-          const chunks = []
-          
-          mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) chunks.push(e.data)
-          }
-          
-          mediaRecorder.onstop = () => {
-            URL.revokeObjectURL(video.src)
-            audioContext.close()
-            const blob = new Blob(chunks, { type: 'audio/webm' })
-            resolve(blob)
-          }
-          
-          mediaRecorder.onerror = (e) => {
-            URL.revokeObjectURL(video.src)
-            audioContext.close()
-            reject(e)
-          }
-          
-          // Start recording and play video
-          mediaRecorder.start()
-          video.play()
-          
-          // Stop when video ends
-          video.onended = () => {
-            mediaRecorder.stop()
-          }
-          
-          // Fallback timeout (max 2 hours)
-          setTimeout(() => {
-            if (mediaRecorder.state === 'recording') {
-              mediaRecorder.stop()
-            }
-          }, 2 * 60 * 60 * 1000)
-          
-        } catch (error) {
-          URL.revokeObjectURL(video.src)
-          reject(error)
-        }
-      }
-      
-      video.onerror = () => {
-        URL.revokeObjectURL(video.src)
-        reject(new Error('Failed to load video'))
-      }
+  // Load FFmpeg.wasm (only once)
+  const loadFFmpeg = async () => {
+    if (ffmpegLoadedRef.current && ffmpegRef.current) {
+      return ffmpegRef.current
+    }
+
+    const ffmpeg = new FFmpeg()
+    ffmpegRef.current = ffmpeg
+
+    // Progress tracking
+    ffmpeg.on('progress', ({ progress }) => {
+      setConversionProgress(Math.round(progress * 100))
     })
+
+    try {
+      // Load FFmpeg.wasm core files from CDN
+      const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm'
+      
+      setConversionMessage('Loading FFmpeg...')
+      await ffmpeg.load({
+        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+      })
+      
+      ffmpegLoadedRef.current = true
+      return ffmpeg
+    } catch (error) {
+      console.error('Failed to load FFmpeg:', error)
+      throw new Error('Failed to load FFmpeg. Please try again or use a smaller file.')
+    }
+  }
+
+  // Extract audio from video using FFmpeg.wasm (high-quality conversion)
+  const extractAudioFromVideo = async (videoFile) => {
+    try {
+      // Load FFmpeg if not already loaded
+      const ffmpeg = await loadFFmpeg()
+      
+      setConversionMessage('Processing video...')
+      setConversionProgress(0)
+
+      // Generate unique filenames
+      const inputFileName = `input.${videoFile.name.split('.').pop()}`
+      const outputFileName = 'output.mp3'
+
+      // Write input file to FFmpeg virtual file system
+      setConversionMessage('Reading video file...')
+      await ffmpeg.writeFile(inputFileName, await fetchFile(videoFile))
+
+      // Convert video to high-quality MP3 audio
+      // -ac 2: Stereo audio
+      // -ar 44100: 44.1kHz sample rate (CD quality)
+      // -b:a 192k: 192 kbps bitrate (high quality for speech)
+      // -q:a 2: High quality encoding
+      setConversionMessage('Converting to audio (this may take a while)...')
+      await ffmpeg.exec([
+        '-i', inputFileName,
+        '-vn', // No video
+        '-acodec', 'libmp3lame', // MP3 codec
+        '-ac', '2', // Stereo
+        '-ar', '44100', // 44.1kHz sample rate
+        '-b:a', '192k', // 192 kbps bitrate (high quality)
+        '-q:a', '2', // High quality VBR encoding
+        outputFileName
+      ])
+
+      // Read output file
+      setConversionMessage('Finalizing audio...')
+      const data = await ffmpeg.readFile(outputFileName)
+      
+      // Clean up virtual files
+      await ffmpeg.deleteFile(inputFileName)
+      await ffmpeg.deleteFile(outputFileName)
+
+      // Create blob from output
+      const audioBlob = new Blob([data], { type: 'audio/mpeg' })
+      
+      setConversionProgress(100)
+      return audioBlob
+
+    } catch (error) {
+      console.error('FFmpeg conversion error:', error)
+      throw new Error(`Conversion failed: ${error.message}. Try a smaller file or different format.`)
+    }
   }
 
   const getMediaDuration = (file, isVideo = false) => {
@@ -577,6 +599,17 @@ function Analysis() {
                   <div className="conversion-status converting">
                     <span className="spinner">🔄</span>
                     <p>{conversionMessage || 'Converting video to audio...'}</p>
+                    {conversionProgress > 0 && (
+                      <div className="conversion-progress">
+                        <div className="progress-bar">
+                          <div 
+                            className="progress-fill" 
+                            style={{ width: `${conversionProgress}%` }}
+                          ></div>
+                        </div>
+                        <span className="progress-text">{conversionProgress}%</span>
+                      </div>
+                    )}
                   </div>
                 )}
                 {conversionMessage && !isConverting && (
