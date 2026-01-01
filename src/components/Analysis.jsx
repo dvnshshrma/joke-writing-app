@@ -109,19 +109,14 @@ function Analysis() {
       const isAudio = file.type.startsWith('audio/')
       const isVideo = file.type.startsWith('video/')
       const fileSizeMB = file.size / (1024 * 1024)
-      const MAX_SIZE_MB = 1024 // 1GB
-      // NOTE: We allow analyzing the original video <1GB when the user opts in.
+      // Note: No file size limit - FFmpeg.wasm handles large files efficiently
       
       if (isAudio || isVideo) {
-        // Convert videos to audio when:
-        // - video is over the hard 1GB limit (must)
-        // - user has enabled conversion (recommended)
-        const shouldConvert = isVideo && (fileSizeMB > MAX_SIZE_MB || convertVideoToAudio)
+        // Convert videos to audio if user has enabled conversion
+        // FFmpeg.wasm can handle any size, so we respect user preference only
+        const shouldConvert = isVideo && convertVideoToAudio
         if (shouldConvert) {
-          const reason = fileSizeMB > MAX_SIZE_MB
-            ? `over 1GB limit`
-            : `conversion is enabled`
-          setConversionMessage(`Video is ${fileSizeMB.toFixed(0)}MB (${reason}). Converting to audio for analysis...`)
+          setConversionMessage(`Video is ${fileSizeMB.toFixed(0)}MB. Converting to high-quality audio...`)
           setIsConverting(true)
           
           try {
@@ -147,15 +142,11 @@ function Analysis() {
           return
         }
         
-        // Normal file handling (under size limit)
+        // Normal file handling (direct upload, no conversion)
         setAudioFile(file)
         setMediaFile(file)
         setMediaType(isAudio ? 'audio' : 'video')
-        if (isVideo && fileSizeMB > 200) {
-          setConversionMessage('ℹ️ Large videos can fail to upload on some deployments. If analysis fails, enable “Convert video to audio”.')
-        } else {
-          setConversionMessage(null)
-        }
+        setConversionMessage(null)
         
         try {
           const duration = await getMediaDuration(file, isVideo)
