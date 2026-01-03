@@ -295,6 +295,7 @@ joke-writing-app/
 │   │   ├── LongSetEditor.jsx    # Editor for long sets
 │   │   ├── SavedSetsList.jsx    # List and management of saved sets
 │   │   ├── Analysis.jsx         # Performance analysis section
+│   │   ├── ComedyStyle.jsx      # Find Your Style analysis component
 │   │   ├── JokeRecommendations.jsx  # AI-powered joke recommendations
 │   │   ├── DataManager.jsx      # Export/import data manager
 │   ├── services/
