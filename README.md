@@ -47,10 +47,11 @@ A web application for stand-up comedians to organize, edit, and manage versions 
 
 ### ✅ Video Analysis Support (Implemented)
 - **Video Upload**: Upload MP4, MOV, WEBM video recordings
-- **Audio Extraction**: Automatically extracts audio from video for analysis
+- **High-Quality Audio Extraction**: Professional FFmpeg.wasm conversion to MP3 (192 kbps, 44.1kHz, stereo)
+- **No File Size Limit**: FFmpeg.wasm handles large video files efficiently (no 100MB/1GB restrictions)
+- **User-Controlled Conversion**: Toggle to convert videos to audio before analysis
+- **Progress Tracking**: Real-time conversion progress with visual indicators
 - **Same Metrics**: All audio analysis features work with video files
-- **Large File Support**: Up to 1GB file uploads
-- **Auto Conversion**: Videos over 1GB are converted to audio client-side before upload
 
 ### ✅ Performance Trends (Implemented)
 - **Progress Tracking**: See improvement over time (LPM change since first analysis)
@@ -116,6 +117,9 @@ PORT=3001
 
 # Optional: For real AI audio analysis (get free key at https://www.assemblyai.com)
 ASSEMBLYAI_API_KEY=your_assemblyai_api_key_here
+
+# Optional: For OpenAI-powered style classification in "Find Your Style"
+OPENAI_API_KEY=your_openai_api_key_here
 ```
 
 Create `.env` in root directory (for frontend):
@@ -124,7 +128,9 @@ VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your_anon_key_here
 ```
 
-> **Note**: Without an AssemblyAI API key, the app uses simulated analysis data. The free tier includes 100 hours of audio analysis.
+> **Note**: 
+> - Without an AssemblyAI API key, the app uses simulated analysis data. The free tier includes 100 hours of audio analysis.
+> - Without an OpenAI API key, "Find Your Style" uses keyword-based style detection. Adding the key enables AI-powered zero-shot classification for more accurate results.
 
 #### 5. Start the Backend Server
 
@@ -221,8 +227,10 @@ The built files will be in the `dist` directory.
 1. Navigate to **"Analyse your sets"** from the homepage
 2. Choose between **"New Analysis"** or **"View Old Analyses"** tabs
 3. For new analysis:
-   - Select a finalized set to analyze
-   - Upload an audio file (MP3, WAV, M4A, OGG)
+   - Enter a set name for this analysis
+   - Upload an audio or video file (MP3, WAV, M4A, OGG, MP4, MOV, WEBM)
+   - **Video files**: Use the conversion toggle for high-quality audio extraction (FFmpeg.wasm)
+   - **No file size limit**: Large videos are handled efficiently
    - Optionally exclude start and end applause for more accurate metrics
    - Click "Analyze Set" to process
 4. View results:
@@ -231,11 +239,29 @@ The built files will be in the `dist` directory.
    - Average laughs per joke
    - Timeline graph showing laughs throughout the set
    - Per-joke metrics with visual bars
+   - Advanced insights and analytics
 5. View old analyses:
    - Browse all previous analyses
    - Click any analysis to see summary
    - Click "View Full Analysis" to see complete results
+   - Re-analyze any previous analysis
    - Delete analyses you no longer need
+
+### Find Your Style
+
+1. Navigate to **"Find your Style"** from the homepage
+2. Choose input method:
+   - **Audio/Video Upload**: Upload your comedy set recording
+     - Toggle "Convert video to audio" for high-quality MP3 conversion
+     - No file size limit - handles large files efficiently
+     - Progress bar shows conversion status
+   - **Paste Transcript**: Directly paste your comedy set transcript
+3. Click **"Analyze My Style"** to process
+4. View comprehensive results:
+   - **Style Tags**: Your comedy styles with confidence scores
+   - **Writing Elements**: Detected writing techniques and percentages
+   - **Adam Bloom Tools**: Analysis of specific comedy writing tools
+   - **Summary**: AI-generated overview of your comedy style
 
 ### Data Storage
 
