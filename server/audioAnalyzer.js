@@ -2,6 +2,7 @@ import fetch from 'node-fetch';
 import fs from 'fs';
 
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 /**
  * Real AI Audio Analyzer using AssemblyAI
@@ -114,40 +115,12 @@ const COMEDY_TOPICS = [
 ];
 
 /**
- * Classify joke topic - first try matching saved joke headers, then fall back to keyword categories
+ * Classify joke topic using keyword-based classification (fallback when AI is unavailable)
  */
-function classifyJokeTopic(text, savedJokeHeaders = []) {
+function classifyJokeTopic(text) {
   const lowerText = text.toLowerCase();
   
-  // First, try to match against saved joke headers
-  if (savedJokeHeaders && savedJokeHeaders.length > 0) {
-    let bestMatch = null;
-    let bestScore = 0;
-    
-    for (const header of savedJokeHeaders) {
-      const headerWords = header.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-      let matchScore = 0;
-      
-      for (const word of headerWords) {
-        if (lowerText.includes(word)) {
-          matchScore++;
-        }
-      }
-      
-      // Require at least 2 matching words or 50% of header words
-      const threshold = Math.max(2, Math.floor(headerWords.length * 0.5));
-      if (matchScore >= threshold && matchScore > bestScore) {
-        bestScore = matchScore;
-        bestMatch = header;
-      }
-    }
-    
-    if (bestMatch) {
-      return bestMatch; // Return the matching joke header as the topic
-    }
-  }
-  
-  // Fall back to keyword-based classification
+  // Use keyword-based classification
   for (const topic of COMEDY_TOPICS) {
     for (const keyword of topic.keywords) {
       if (lowerText.includes(keyword)) {
@@ -157,6 +130,168 @@ function classifyJokeTopic(text, savedJokeHeaders = []) {
   }
   
   return 'Observational';
+}
+
+/**
+ * Classify jokes using OpenAI AI analysis
+ * Groups jokes by topic and generates headers for each topic
+ * Falls back to keyword-based classification if OpenAI is unavailable
+ */
+async function classifyJokesWithAI(jokes) {
+  // If no jokes, return empty array
+  if (!jokes || jokes.length === 0) {
+    return jokes;
+  }
+
+  // If OpenAI API key is not available, use keyword-based fallback
+  if (!OPENAI_API_KEY || OPENAI_API_KEY === 'your_openai_api_key_here') {
+    console.log('ℹ️ OpenAI API key not found, using keyword-based topic classification');
+    return jokes.map(joke => ({
+      ...joke,
+      topic: classifyJokeTopic(joke.text || joke.summary || ''),
+      header: joke.header || generateSmartHeader(joke.text || joke.summary || '', joke.index || 0, classifyJokeTopic(joke.text || joke.summary || ''))
+    }));
+  }
+
+  try {
+    console.log(`🤖 Using OpenAI to classify ${jokes.length} jokes into topics...`);
+    
+    // Prepare joke texts with indices for the prompt
+    const jokesList = jokes.map((joke, idx) => {
+      const text = joke.text || joke.summary || '';
+      return `Joke ${joke.index !== undefined ? joke.index : idx}: "${text.substring(0, 500)}"`;
+    }).join('\n\n');
+
+    const prompt = `You are analyzing a stand-up comedy set transcript. I've extracted ${jokes.length} joke segments from a performance.
+
+Your task:
+1. Identify the main topics/themes in these jokes (e.g., "Dating", "Work Life", "Family", "Technology", "Social Media", etc.)
+2. Group similar jokes together by topic
+3. Generate concise, descriptive headers for each topic/group (2-5 words, comedy-style titles)
+4. Assign each joke to a topic group
+
+Return ONLY a valid JSON object in this exact format (no markdown, no code blocks, just raw JSON):
+{
+  "topics": {
+    "topic_1": {
+      "header": "Dating in Modern Times",
+      "jokeIndices": [0, 3, 5]
+    },
+    "topic_2": {
+      "header": "Work Life Struggles",
+      "jokeIndices": [1, 4]
+    }
+  }
+}
+
+Rules:
+- Each joke index must appear in exactly one topic's jokeIndices array
+- Include ALL joke indices (0 to ${jokes.length - 1})
+- Headers should be 2-5 words, descriptive, comedy-style
+- Group jokes by semantic similarity, not just keywords
+- Create 2-8 topics (fewer if jokes are very similar, more if diverse)
+
+Jokes to analyze:
+${jokesList}
+
+Return the JSON now:`;
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an expert comedy analyst. Analyze joke segments and classify them into topics. Return only valid JSON, no markdown formatting.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 2000
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(`OpenAI API error: ${response.status} - ${errorData.error?.message || response.statusText}`);
+    }
+
+    const data = await response.json();
+    const content = data.choices[0]?.message?.content?.trim() || '';
+    
+    // Extract JSON from response (handle markdown code blocks if present)
+    let jsonContent = content;
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      jsonContent = jsonMatch[0];
+    }
+
+    const classification = JSON.parse(jsonContent);
+    
+    // Create a map of joke index to topic
+    const jokeIndexToTopic = {};
+    const topicHeaders = {};
+    
+    if (classification.topics) {
+      Object.entries(classification.topics).forEach(([topicKey, topicData]) => {
+        const header = topicData.header || topicKey;
+        topicHeaders[topicKey] = header;
+        if (topicData.jokeIndices && Array.isArray(topicData.jokeIndices)) {
+          topicData.jokeIndices.forEach(jokeIdx => {
+            jokeIndexToTopic[jokeIdx] = {
+              topic: header,
+              header: header
+            };
+          });
+        }
+      });
+    }
+
+    // Assign topics to jokes
+    const classifiedJokes = jokes.map(joke => {
+      const jokeIdx = joke.index !== undefined ? joke.index : jokes.indexOf(joke);
+      const topicInfo = jokeIndexToTopic[jokeIdx];
+      
+      if (topicInfo) {
+        return {
+          ...joke,
+          topic: topicInfo.topic,
+          header: joke.header || topicInfo.header
+        };
+      } else {
+        // Fallback if joke index not found in classification
+        const fallbackTopic = classifyJokeTopic(joke.text || joke.summary || '');
+        return {
+          ...joke,
+          topic: fallbackTopic,
+          header: joke.header || generateSmartHeader(joke.text || joke.summary || '', jokeIdx, fallbackTopic)
+        };
+      }
+    });
+
+    console.log(`✅ AI classified ${classifiedJokes.length} jokes into ${Object.keys(topicHeaders).length} topics`);
+    return classifiedJokes;
+
+  } catch (error) {
+    console.error('⚠️ OpenAI classification failed, using keyword-based fallback:', error.message);
+    // Fallback to keyword-based classification
+    return jokes.map(joke => {
+      const fallbackTopic = classifyJokeTopic(joke.text || joke.summary || '');
+      return {
+        ...joke,
+        topic: fallbackTopic,
+        header: joke.header || generateSmartHeader(joke.text || joke.summary || '', joke.index || 0, fallbackTopic)
+      };
+    });
+  }
 }
 
 /**
@@ -215,8 +350,9 @@ function generateSmartHeader(jokeText, index, topic) {
 /**
  * Extract jokes from transcript using topic modeling and silence gap detection
  * Minimum: 4 jokes for a 7-minute set (~1 joke per 1.5-2 minutes)
+ * Uses AI to classify jokes into topics
  */
-function extractJokesFromTranscript(transcript, excludeStart = 0, excludeEnd = 0, savedJokeHeaders = []) {
+async function extractJokesFromTranscript(transcript, excludeStart = 0, excludeEnd = 0) {
   const words = transcript.words || [];
   const sentences = transcript.sentences || [];
   const chapters = transcript.chapters || [];
@@ -233,13 +369,11 @@ function extractJokesFromTranscript(transcript, excludeStart = 0, excludeEnd = 0
   // If we have auto-chapters, use them as joke boundaries
   if (chapters && chapters.length >= minJokes) {
     console.log(`📚 Found ${chapters.length} auto-chapters (topics) in transcript`);
-    return chapters.map((chapter, i) => {
+    const extractedJokes = chapters.map((chapter, i) => {
       const text = chapter.gist || chapter.summary || '';
-      const topic = classifyJokeTopic(text, savedJokeHeaders);
       return {
         index: i,
-        header: chapter.headline || generateSmartHeader(text, i, topic),
-        topic: topic,
+        header: chapter.headline || '',
         summary: chapter.summary || '',
         text: text,
         startTime: chapter.start / 1000,
@@ -247,6 +381,8 @@ function extractJokesFromTranscript(transcript, excludeStart = 0, excludeEnd = 0
         duration: (chapter.end - chapter.start) / 1000
       };
     });
+    // Classify jokes using AI
+    return await classifyJokesWithAI(extractedJokes);
   }
   
   // Detect jokes using silence gaps (laugh breaks)
@@ -292,13 +428,9 @@ function extractJokesFromTranscript(transcript, excludeStart = 0, excludeEnd = 0
     
     if (jokeWords.length > 5) {
       const jokeText = jokeWords.join(' ');
-      const topic = classifyJokeTopic(jokeText, savedJokeHeaders);
-      const header = generateSmartHeader(jokeText, jokeIndex, topic);
       
       jokes.push({
         index: jokeIndex,
-        header: header,
-        topic: topic,
         text: jokeText,
         startTime: lastEndPosition / 1000,
         endTime: gap.position / 1000,
@@ -315,11 +447,8 @@ function extractJokesFromTranscript(transcript, excludeStart = 0, excludeEnd = 0
   const finalWords = words.filter(w => w.start >= lastEndPosition).map(w => w.text);
   if (finalWords.length > 5) {
     const jokeText = finalWords.join(' ');
-    const topic = classifyJokeTopic(jokeText, savedJokeHeaders);
     jokes.push({
       index: jokeIndex,
-      header: generateSmartHeader(jokeText, jokeIndex, topic),
-      topic: topic,
       text: jokeText,
       startTime: lastEndPosition / 1000,
       endTime: audioDuration - excludeEnd,
@@ -344,11 +473,8 @@ function extractJokesFromTranscript(transcript, excludeStart = 0, excludeEnd = 0
       
       if (chunkWords.length > 3) {
         const jokeText = chunkWords.join(' ');
-        const topic = classifyJokeTopic(jokeText, savedJokeHeaders);
         jokes.push({
           index: i,
-          header: generateSmartHeader(jokeText, i, topic),
-          topic: topic,
           text: jokeText,
           startTime: startTime,
           endTime: endTime,
@@ -358,12 +484,14 @@ function extractJokesFromTranscript(transcript, excludeStart = 0, excludeEnd = 0
     }
   }
   
-  console.log(`🎭 Extracted ${jokes.length} jokes with topics: ${[...new Set(jokes.map(j => j.topic))].join(', ')}`);
-  return jokes;
+  // Classify all extracted jokes using AI
+  const classifiedJokes = await classifyJokesWithAI(jokes);
+  console.log(`🎭 Extracted ${classifiedJokes.length} jokes with topics: ${[...new Set(classifiedJokes.map(j => j.topic))].join(', ')}`);
+  return classifiedJokes;
 }
 
 // Analyze transcription for laughter patterns with joke extraction
-function analyzeLaughterPatterns(transcript, setData, excludeStart = 0, excludeEnd = 0, useTranscript = false, savedJokeHeaders = []) {
+async function analyzeLaughterPatterns(transcript, setData, excludeStart = 0, excludeEnd = 0, useTranscript = false) {
   const audioDuration = transcript.audio_duration || 300;
   const effectiveDuration = Math.max(0, audioDuration - excludeStart - excludeEnd);
   const words = transcript.words || [];
@@ -373,7 +501,7 @@ function analyzeLaughterPatterns(transcript, setData, excludeStart = 0, excludeE
   // Extract jokes from transcript if no predefined jokes
   let extractedJokes = [];
   if (useTranscript || !setData || !setData.joke_details || setData.joke_details.length === 0) {
-    extractedJokes = extractJokesFromTranscript(transcript, excludeStart, excludeEnd, savedJokeHeaders);
+    extractedJokes = await extractJokesFromTranscript(transcript, excludeStart, excludeEnd);
   }
   
   const jokeDetails = extractedJokes.length > 0 ? extractedJokes : (setData?.joke_details || setData?.jokeDetails || []);
@@ -491,7 +619,7 @@ function analyzeLaughterPatterns(transcript, setData, excludeStart = 0, excludeE
  * @param {number} excludeEndSeconds - Seconds to exclude from end
  * @param {boolean} useTranscript - If true, extract jokes from transcript instead of using setData
  */
-export async function analyzeAudio(audioFilePath, setData, audioDurationSeconds = null, excludeStartSeconds = 0, excludeEndSeconds = 0, useTranscript = false, savedJokeHeaders = []) {
+export async function analyzeAudio(audioFilePath, setData, audioDurationSeconds = null, excludeStartSeconds = 0, excludeEndSeconds = 0, useTranscript = false) {
   // Check if AssemblyAI API key is configured
   if (ASSEMBLYAI_API_KEY && ASSEMBLYAI_API_KEY !== 'your_assemblyai_api_key_here') {
     try {
@@ -512,13 +640,12 @@ export async function analyzeAudio(audioFilePath, setData, audioDurationSeconds 
       console.log(`📄 Transcript length: ${transcript.text?.length || 0} characters`);
       
       // Analyze for laugh patterns with optional joke extraction
-      const analysis = analyzeLaughterPatterns(
+      const analysis = await analyzeLaughterPatterns(
         transcript,
         setData,
         excludeStartSeconds,
         excludeEndSeconds,
-        useTranscript,
-        savedJokeHeaders
+        useTranscript
       );
       
       console.log(`🎭 Extracted ${analysis.extractedJokes?.length || 0} jokes from transcript`);
@@ -527,19 +654,19 @@ export async function analyzeAudio(audioFilePath, setData, audioDurationSeconds 
       
     } catch (error) {
       console.error('⚠️ AssemblyAI analysis failed, falling back to mock:', error.message);
-      return mockAnalyzeAudio(audioFilePath, setData, audioDurationSeconds, excludeStartSeconds, excludeEndSeconds, useTranscript, savedJokeHeaders);
+      return mockAnalyzeAudio(audioFilePath, setData, audioDurationSeconds, excludeStartSeconds, excludeEndSeconds, useTranscript);
     }
   }
   
   // Use mock analysis if no API key
   console.log('ℹ️ No AssemblyAI API key configured, using mock analysis');
-  return mockAnalyzeAudio(audioFilePath, setData, audioDurationSeconds, excludeStartSeconds, excludeEndSeconds, useTranscript, savedJokeHeaders);
+  return mockAnalyzeAudio(audioFilePath, setData, audioDurationSeconds, excludeStartSeconds, excludeEndSeconds, useTranscript);
 }
 
 /**
  * Enhanced mock analysis with realistic patterns
  */
-async function mockAnalyzeAudio(audioFilePath, setData, audioDurationSeconds = null, excludeStartSeconds = 0, excludeEndSeconds = 0, useTranscript = false, savedJokeHeaders = []) {
+async function mockAnalyzeAudio(audioFilePath, setData, audioDurationSeconds = null, excludeStartSeconds = 0, excludeEndSeconds = 0, useTranscript = false) {
   // Simulate processing time
   await new Promise(resolve => setTimeout(resolve, 2000));
   
@@ -557,23 +684,21 @@ async function mockAnalyzeAudio(audioFilePath, setData, audioDurationSeconds = n
     numJokes = Math.max(3, Math.min(12, Math.floor(effectiveDuration / 35)));
     console.log(`📝 Mock transcript mode: Generating ${numJokes} simulated jokes`);
     
-    // Use saved joke headers if available, otherwise use generic topics
-    const topicsToUse = savedJokeHeaders.length > 0 
-      ? savedJokeHeaders 
-      : [
-          'Dating in the modern age',
-          'Working from home struggles',
-          'Family gatherings',
-          'Social media addiction',
-          'Gym experiences',
-          'Food delivery apps',
-          'Online shopping',
-          'Pet ownership',
-          'Adulting problems',
-          'Technology fails',
-          'Travel mishaps',
-          'Coffee dependency'
-        ];
+    // Use generic topics for mock analysis
+    const topicsToUse = [
+      'Dating in the modern age',
+      'Working from home struggles',
+      'Family gatherings',
+      'Social media addiction',
+      'Gym experiences',
+      'Food delivery apps',
+      'Online shopping',
+      'Pet ownership',
+      'Adulting problems',
+      'Technology fails',
+      'Travel mishaps',
+      'Coffee dependency'
+    ];
     
     const jokeDuration = effectiveDuration / numJokes;
     for (let i = 0; i < numJokes; i++) {

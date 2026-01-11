@@ -473,22 +473,6 @@ app.post('/api/analysis/analyze', (req, res, next) => {
       }
     }
 
-    // Fetch all saved jokes to use their headers as topic references
-    let savedJokeHeaders = [];
-    try {
-      const { data: jokes, error: jokesError } = await supabase
-        .from('jokes')
-        .select('header')
-        .order('updated_at', { ascending: false });
-      
-      if (!jokesError && jokes) {
-        savedJokeHeaders = jokes.map(j => j.header).filter(h => h && h.trim());
-      }
-      console.log(`📋 Loaded ${savedJokeHeaders.length} joke headers for topic matching`);
-    } catch (e) {
-      console.log('⚠️ Could not load joke headers:', e.message);
-    }
-
     // Analyze audio with optional transcript-based joke extraction
     console.log(`🎬 Analyzing: ${req.file.originalname}`);
     console.log(`📝 Set name: ${setName || setData?.header || 'Untitled'}`);
@@ -500,8 +484,7 @@ app.post('/api/analysis/analyze', (req, res, next) => {
       audioDurationSeconds, 
       excludeStartSeconds, 
       excludeEndSeconds,
-      useTranscriptMode,
-      savedJokeHeaders
+      useTranscriptMode
     );
 
     // Save analysis to database (including transcript and extracted jokes)
