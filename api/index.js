@@ -349,66 +349,164 @@ const segmentTranscriptIntoJokes = (words = [], transcriptText = '', chapters = 
   return segments;
 };
 
-// Match transcript segments to user's saved jokes using similarity
-const matchSegmentsToJokes = async (segments, savedJokes, stopWords) => {
-  if (!savedJokes || savedJokes.length === 0) {
-    // No saved jokes - generate headers with AI for all segments
-    const segmentsWithHeaders = await Promise.all(segments.map(async (segment) => {
-      const aiHeader = await generateJokeHeaderWithAI(segment.text || '');
-      return {
-        ...segment,
-        matchedHeader: aiHeader || extractSegmentTopic(segment.text || '', stopWords),
-        similarity: 0,
-        isAIGenerated: !!aiHeader
-      };
-    }));
-    return segmentsWithHeaders;
+// Classify jokes using OpenAI AI analysis - groups jokes by topic and generates headers
+// This replaces the old database matching approach with AI-powered clustering
+const classifyJokesWithAI = async (segments) => {
+  // If no segments, return empty array
+  if (!segments || segments.length === 0) {
+    return segments;
   }
-  
-  // Build vectors for all saved jokes
-  const jokeVectors = savedJokes.map(joke => ({
-      id: joke.id,
-    header: joke.header || 'Untitled',
-    vector: buildTextVector(extractJokeText(joke), stopWords),
-    text: extractJokeText(joke)
-  }));
-  
-  // Match each segment to the most similar joke, with AI fallback
-  const matchedSegments = await Promise.all(segments.map(async (segment) => {
-    const segmentVector = buildTextVector(segment.text || '', stopWords);
-    let bestMatch = null;
-    let bestSimilarity = 0;
+
+  // If OpenAI API key is not available, use fallback topic extraction
+  if (!OPENAI_API_KEY || OPENAI_API_KEY === 'your_openai_api_key_here') {
+    console.log('ℹ️ OpenAI API key not found, using keyword-based topic extraction');
+    return segments.map(segment => ({
+      ...segment,
+      matchedHeader: extractSegmentTopic(segment.text || '', new Set()) || `Joke ${segment.index + 1}`,
+      isAIGenerated: false
+    }));
+  }
+
+  try {
+    console.log(`🤖 Using OpenAI to classify ${segments.length} joke segments into topics...`);
     
-    jokeVectors.forEach(jokeVec => {
-      const similarity = cosineSimilarity(segmentVector, jokeVec.vector);
-      if (similarity > bestSimilarity) {
-        bestSimilarity = similarity;
-        bestMatch = jokeVec;
+    // Prepare segment texts with indices for the prompt
+    const segmentsList = segments.map((segment, idx) => {
+      const text = segment.text || '';
+      return `Segment ${segment.index !== undefined ? segment.index : idx}: "${text.substring(0, 500)}"`;
+    }).join('\n\n');
+
+    const prompt = `You are analyzing a stand-up comedy set transcript. I've extracted ${segments.length} joke segments from a performance.
+
+Your task:
+1. Identify the main topics/themes in these jokes (e.g., "Dating", "Work Life", "Family", "Technology", "Social Media", etc.)
+2. Group similar jokes together by topic
+3. Generate concise, descriptive headers for each topic/group (2-5 words, comedy-style titles)
+4. Assign each segment to a topic group
+
+Return ONLY a valid JSON object in this exact format (no markdown, no code blocks, just raw JSON):
+{
+  "topics": {
+    "topic_1": {
+      "header": "Dating in Modern Times",
+      "segmentIndices": [0, 3, 5]
+    },
+    "topic_2": {
+      "header": "Work Life Struggles",
+      "segmentIndices": [1, 4]
+    }
+  }
+}
+
+Rules:
+- Each segment index must appear in exactly one topic's segmentIndices array
+- Include ALL segment indices (0 to ${segments.length - 1})
+- Headers should be 2-5 words, descriptive, comedy-style
+- Group segments by semantic similarity, not just keywords
+- Create 2-8 topics (fewer if segments are very similar, more if diverse)
+
+Segments to analyze:
+${segmentsList}
+
+Return the JSON now:`;
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an expert comedy analyst. Analyze joke segments and classify them into topics. Return only valid JSON, no markdown formatting.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 2000
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(`OpenAI API error: ${response.status} - ${errorData.error?.message || response.statusText}`);
+    }
+
+    const data = await response.json();
+    const content = data.choices[0]?.message?.content?.trim() || '';
+    
+    // Extract JSON from response (handle markdown code blocks if present)
+    let jsonContent = content;
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      jsonContent = jsonMatch[0];
+    }
+
+    const classification = JSON.parse(jsonContent);
+    
+    // Create a map of segment index to topic
+    const segmentIndexToTopic = {};
+    const topicHeaders = {};
+    
+    if (classification.topics) {
+      Object.entries(classification.topics).forEach(([topicKey, topicData]) => {
+        const header = topicData.header || topicData.segmentIndices ? topicData.header : topicKey;
+        topicHeaders[topicKey] = header;
+        const indices = topicData.segmentIndices || topicData.jokeIndices || [];
+        if (Array.isArray(indices)) {
+          indices.forEach(segmentIdx => {
+            segmentIndexToTopic[segmentIdx] = {
+              topic: header,
+              header: header
+            };
+          });
+        }
+      });
+    }
+
+    // Assign topics to segments
+    const classifiedSegments = segments.map(segment => {
+      const segmentIdx = segment.index !== undefined ? segment.index : segments.indexOf(segment);
+      const topicInfo = segmentIndexToTopic[segmentIdx];
+      
+      if (topicInfo) {
+        return {
+          ...segment,
+          matchedHeader: topicInfo.header,
+          isAIGenerated: true
+        };
+      } else {
+        // Fallback if segment index not found in classification
+        const fallbackHeader = extractSegmentTopic(segment.text || '', new Set()) || `Joke ${segmentIdx + 1}`;
+        return {
+          ...segment,
+          matchedHeader: fallbackHeader,
+          isAIGenerated: false
+        };
       }
     });
-    
-    // Only use match if similarity is above threshold (0.15 = 15% overlap)
-    if (bestSimilarity >= 0.15) {
+
+    console.log(`✅ AI classified ${classifiedSegments.length} segments into ${Object.keys(topicHeaders).length} topics`);
+    return classifiedSegments;
+
+  } catch (error) {
+    console.error('⚠️ OpenAI classification failed, using keyword-based fallback:', error.message);
+    // Fallback to keyword-based topic extraction
+    return segments.map(segment => {
+      const fallbackHeader = extractSegmentTopic(segment.text || '', new Set()) || `Joke ${segment.index !== undefined ? segment.index + 1 : segments.indexOf(segment) + 1}`;
       return {
         ...segment,
-        matchedHeader: bestMatch.header,
-        similarity: bestSimilarity,
-        matchedJokeId: bestMatch.id,
+        matchedHeader: fallbackHeader,
         isAIGenerated: false
       };
-    } else {
-      // No good match - use AI to generate header
-      const aiHeader = await generateJokeHeaderWithAI(segment.text || '');
-      return {
-        ...segment,
-        matchedHeader: aiHeader || extractSegmentTopic(segment.text || '', stopWords),
-        similarity: bestSimilarity,
-        isAIGenerated: !!aiHeader
-      };
-    }
-  }));
-  
-  return matchedSegments;
+    });
+  }
 };
 
 // Generate a joke header using AI (OpenAI)
@@ -574,38 +672,6 @@ const extractTopicsFromTranscript = (transcriptText) => {
 };
 
 const buildJokeMetricsFromTranscript = async ({ user, transcriptText, jobWords = [], jobChapters = null, estimatedMinutes = 7 }) => {
-  // Stop words for text processing
-  const stopWords = new Set([
-    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from',
-    'as', 'is', 'was', 'are', 'were', 'been', 'be', 'have', 'has', 'had', 'do', 'does', 'did',
-    'will', 'would', 'should', 'could', 'may', 'might', 'must', 'can', 'this', 'that', 'these', 'those',
-    'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them',
-    'what', 'which', 'who', 'whom', 'whose', 'where', 'when', 'why', 'how',
-    'if', 'then', 'else', 'so', 'than', 'just', 'only', 'even', 'also', 'still', 'yet', 'already',
-    'very', 'really', 'quite', 'pretty', 'too', 'more', 'most', 'less', 'least', 'well', 'good', 'bad',
-    'all', 'both', 'each', 'every', 'some', 'any', 'no', 'not', 'yes', 'yeah', 'ok', 'okay',
-    'got', 'get', 'gets', 'getting', 'go', 'goes', 'going', 'went', 'gone', 'come', 'comes', 'coming', 'came',
-    'know', 'knows', 'knew', 'think', 'thinks', 'thought', 'see', 'sees', 'saw', 'say', 'says', 'said', 'tell', 'tells', 'told',
-    'like', 'likes', 'liked', 'want', 'wants', 'wanted', 'need', 'needs', 'needed', 'try', 'tries', 'tried',
-    'uh', 'um', 'ah', 'oh', 'hmm', 'er', 'haha', 'lol', 'literally', 'actually', 'basically', 'obviously'
-  ]);
-
-  // Fetch user's saved jokes for training/matching
-  let savedJokes = [];
-  try {
-    if (user && supabaseAdmin) {
-      const { data } = await supabaseAdmin
-      .from('jokes')
-        .select('id, header, sections')
-        .eq('user_id', user.id)
-        .order('updated_at', { ascending: false })
-        .limit(50); // Get more jokes for better matching
-      savedJokes = (data || []).filter(j => j.header && j.header.trim().length > 0);
-    }
-  } catch (err) {
-    console.log('Error fetching jokes for matching:', err.message);
-  }
-
   // Segment transcript into joke candidates
   const segments = segmentTranscriptIntoJokes(jobWords, transcriptText, jobChapters, 4, estimatedMinutes);
   
@@ -620,12 +686,12 @@ const buildJokeMetricsFromTranscript = async ({ user, transcriptText, jobWords =
     }));
   }
 
-  // Match segments to saved jokes using similarity (with AI header generation for unmatched segments)
-  const matchedSegments = await matchSegmentsToJokes(segments, savedJokes, stopWords);
+  // Use AI to classify segments into topics and generate headers
+  const classifiedSegments = await classifyJokesWithAI(segments);
 
   // Convert to joke metrics format
-  return matchedSegments.map((segment, i) => {
-    let header = segment.matchedHeader || segment.headline || segment.extractedTopic;
+  return classifiedSegments.map((segment, i) => {
+    let header = segment.matchedHeader || segment.headline || `Joke ${i + 1}`;
     
     // Capitalize first letter
     if (header) {
@@ -639,9 +705,7 @@ const buildJokeMetricsFromTranscript = async ({ user, transcriptText, jobWords =
       header,
       laughs: 0,
       startTime: segment.startTime,
-      endTime: segment.endTime,
-      matchedJokeId: segment.matchedJokeId || null,
-      similarity: segment.similarity || 0
+      endTime: segment.endTime
     };
   });
 };
@@ -899,6 +963,7 @@ export default async function handler(req, res) {
           category: a.category,
           timeline: a.timeline || [],
           jokeMetrics: a.joke_metrics || [],
+          extractedJokes: a.extracted_jokes || [],
           createdAt: a.created_at,
           speakingPace: a.speaking_pace || null,
           wordCount: a.word_count || null,
@@ -1055,6 +1120,7 @@ export default async function handler(req, res) {
             category: a.category,
             timeline: a.timeline || [],
             jokeMetrics: a.joke_metrics || [],
+            extractedJokes: a.extracted_jokes || [],
             transcriptText: a.transcript_text || job.text || '',
             isMockData: false,
             speakingPace: a.speaking_pace || null,
@@ -1089,7 +1155,7 @@ export default async function handler(req, res) {
         // Estimate duration in minutes for joke segmentation
         const estimatedMinutes = calculatedEffectiveDuration ? Math.ceil(calculatedEffectiveDuration / 60) : 7;
         
-        // Use improved topic modeling with joke matching and better segmentation
+        // Use AI-powered topic modeling and clustering (no database matching)
         let jokeMetrics = await buildJokeMetricsFromTranscript({ 
           user, 
           transcriptText,
@@ -1097,6 +1163,20 @@ export default async function handler(req, res) {
           jobChapters: job.chapters || null,
           estimatedMinutes
         });
+        
+        // Create extractedJokes array from the segments (for frontend display)
+        const segments = segmentTranscriptIntoJokes(job.words || [], transcriptText, job.chapters || null, 4, estimatedMinutes);
+        const classifiedSegments = await classifyJokesWithAI(segments);
+        const extractedJokes = classifiedSegments.map(segment => ({
+          index: segment.index !== undefined ? segment.index : classifiedSegments.indexOf(segment),
+          header: segment.matchedHeader || segment.headline || `Joke ${segment.index !== undefined ? segment.index + 1 : classifiedSegments.indexOf(segment) + 1}`,
+          topic: segment.matchedHeader || null, // Use header as topic since AI classified them
+          text: segment.text || '',
+          startTime: segment.startTime || null,
+          endTime: segment.endTime || null,
+          duration: segment.endTime && segment.startTime ? segment.endTime - segment.startTime : null
+        }));
+        
         // Distribute laughs evenly across jokes for display (until we do true laughter-to-joke alignment)
         if (jokeMetrics.length) {
           const per = Math.floor(totalLaughs / jokeMetrics.length);
@@ -1120,6 +1200,7 @@ export default async function handler(req, res) {
     category,
           timeline,
           joke_metrics: jokeMetrics,
+          extracted_jokes: extractedJokes,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           user_id: user?.id || null,
@@ -1157,6 +1238,7 @@ export default async function handler(req, res) {
           category,
           timeline,
           jokeMetrics,
+          extractedJokes: extractedJokes,
           transcriptText,
           isMockData: false,
           excludedStart,
@@ -1190,6 +1272,8 @@ export default async function handler(req, res) {
       category: data.category,
       timeline: data.timeline || [],
       jokeMetrics: data.joke_metrics || [],
+      extractedJokes: data.extracted_jokes || [],
+      transcriptText: data.transcript_text || null,
           createdAt: data.created_at
         });
       }
