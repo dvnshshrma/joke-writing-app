@@ -705,31 +705,47 @@ app.post('/api/compress-video', videoUpload.single('video'), async (req, res) =>
       return res.status(400).json({ error: 'No video file uploaded' });
     }
 
+    console.log(`📤 Received video file: ${req.file.originalname}, size: ${(req.file.size / 1024 / 1024).toFixed(2)} MB`);
+
+    // Ensure uploads directory exists
+    const outputDir = path.join(__dirname, 'uploads');
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+      console.log(`📁 Created uploads directory: ${outputDir}`);
+    }
+
     // Check if ffmpeg is available
     try {
       await new Promise((resolve, reject) => {
         ffmpeg.getAvailableCodecs((err) => {
-          if (err) reject(err);
-          else resolve();
+          if (err) {
+            console.error('FFmpeg codec check error:', err);
+            reject(err);
+          } else {
+            resolve();
+          }
         });
       });
+      console.log('✅ FFmpeg is available');
     } catch (ffmpegError) {
-      console.error('FFmpeg not available:', ffmpegError);
+      console.error('❌ FFmpeg not available:', ffmpegError);
       return res.status(500).json({ 
         error: 'FFmpeg is not installed or not available on the server',
-        details: 'Please install FFmpeg on your system. Visit https://ffmpeg.org/download.html for installation instructions.'
+        details: ffmpegError.message || 'Please install FFmpeg on your system. Visit https://ffmpeg.org/download.html for installation instructions.'
       });
     }
 
     inputPath = req.file.path;
     const originalSize = req.file.size;
     const targetSize = 2 * 1024 * 1024 * 1024; // 2GB in bytes
-    const outputDir = path.join(__dirname, 'uploads');
     
     // Generate output filename
     const ext = path.extname(req.file.originalname) || '.mp4';
     const baseName = path.basename(req.file.originalname, ext);
     outputPath = path.join(outputDir, `${baseName}_compressed_${Date.now()}${ext}`);
+    
+    console.log(`📁 Input: ${inputPath}`);
+    console.log(`📁 Output: ${outputPath}`);
 
     console.log(`🎬 Compressing video: ${req.file.originalname} (${(originalSize / 1024 / 1024 / 1024).toFixed(2)} GB)`);
 
@@ -741,14 +757,25 @@ app.post('/api/compress-video', videoUpload.single('video'), async (req, res) =>
     const getVideoDuration = () => {
       return new Promise((resolve, reject) => {
         ffmpeg.ffprobe(inputPath, (err, metadata) => {
-          if (err) reject(err);
-          else resolve(metadata.format.duration);
+          if (err) {
+            console.error('❌ FFprobe error:', err);
+            reject(new Error(`Failed to analyze video: ${err.message}`));
+          } else if (!metadata || !metadata.format || !metadata.format.duration) {
+            reject(new Error('Could not determine video duration'));
+          } else {
+            resolve(metadata.format.duration);
+          }
         });
       });
     };
 
-    const duration = await getVideoDuration();
-    console.log(`⏱️  Video duration: ${Math.floor(duration / 60)}:${Math.floor(duration % 60)}`);
+    let duration;
+    try {
+      duration = await getVideoDuration();
+      console.log(`⏱️  Video duration: ${Math.floor(duration / 60)}:${Math.floor(duration % 60)}`);
+    } catch (durationError) {
+      throw new Error(`Failed to get video duration: ${durationError.message}`);
+    }
 
     // Calculate target bitrate (in kbps)
     // Formula: bitrate (kbps) = (target_size_bytes * 8) / (duration_seconds * 1000)
@@ -762,7 +789,7 @@ app.post('/api/compress-video', videoUpload.single('video'), async (req, res) =>
 
     // Compress video with optimal settings
     await new Promise((resolve, reject) => {
-      ffmpeg(inputPath)
+      const ffmpegProcess = ffmpeg(inputPath)
         .videoCodec('libx264') // H.264 codec
         .audioCodec('aac') // AAC audio codec
         .videoBitrate(videoBitrate) // Dynamic bitrate based on target size
@@ -787,13 +814,28 @@ app.post('/api/compress-video', videoUpload.single('video'), async (req, res) =>
         })
         .on('end', () => {
           console.log('✅ Compression complete');
+          // Verify output file exists
+          if (!fs.existsSync(outputPath)) {
+            reject(new Error('Compression completed but output file not found'));
+            return;
+          }
           resolve();
         })
         .on('error', (err) => {
           console.error('❌ FFmpeg error:', err);
-          reject(err);
+          console.error('❌ Error message:', err.message);
+          reject(new Error(`FFmpeg compression failed: ${err.message}`));
         })
         .save(outputPath);
+      
+      // Add timeout (30 minutes max)
+      setTimeout(() => {
+        if (ffmpegProcess && ffmpegProcess.ffmpegProc) {
+          console.error('⏰ Compression timeout - killing process');
+          ffmpegProcess.kill('SIGKILL');
+          reject(new Error('Compression timeout - process took too long'));
+        }
+      }, 30 * 60 * 1000);
     });
 
     // Check output file size

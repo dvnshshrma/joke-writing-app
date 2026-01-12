@@ -43,53 +43,70 @@ function VideoCompressor() {
       const formData = new FormData()
       formData.append('video', videoFile)
 
-      const xhr = new XMLHttpRequest()
-
-      // Track upload progress
-      xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable) {
-          const uploadProgress = (e.loaded / e.total) * 50 // Upload is 50% of total
-          setProgress(uploadProgress)
-        }
+      const response = await fetch(`${API_BASE_URL}/api/compress-video`, {
+        method: 'POST',
+        body: formData
       })
 
-      // Track download progress
-      xhr.addEventListener('progress', (e) => {
-        if (e.lengthComputable) {
-          const downloadProgress = 50 + (e.loaded / e.total) * 50 // Download is remaining 50%
-          setProgress(downloadProgress)
+      // Check if response is OK
+      if (!response.ok) {
+        // Try to parse error as JSON
+        let errorMessage = `Server error: ${response.status} ${response.statusText}`
+        try {
+          const errorData = await response.json()
+          errorMessage = errorData.error || errorData.details || errorData.message || errorMessage
+        } catch (e) {
+          // If not JSON, try text
+          try {
+            const errorText = await response.text()
+            if (errorText) errorMessage = errorText
+          } catch (e2) {
+            // Keep default error message
+          }
         }
-      })
-
-      xhr.open('POST', `${API_BASE_URL}/api/compress-video`)
-
-      xhr.onload = () => {
-        if (xhr.status === 200) {
-          const blob = xhr.response
-          const url = URL.createObjectURL(blob)
-          setCompressedVideoUrl(url)
-          setCompressedSize(blob.size)
-          setProgress(100)
-          setIsCompressing(false)
-        } else {
-          const errorText = xhr.responseText || 'Compression failed'
-          setError(errorText)
-          setIsCompressing(false)
-          setProgress(0)
-        }
+        setError(errorMessage)
+        setIsCompressing(false)
+        setProgress(0)
+        return
       }
 
-      xhr.onerror = () => {
-        setError('Network error. Please check your connection and try again.')
+      // Check content type to see if it's a video or JSON error
+      const contentType = response.headers.get('content-type') || ''
+      
+      if (contentType.includes('application/json')) {
+        // Server returned JSON (error)
+        const errorData = await response.json()
+        setError(errorData.error || errorData.details || errorData.message || 'Compression failed')
+        setIsCompressing(false)
+        setProgress(0)
+        return
+      }
+
+      // It's a video file
+      const blob = await response.blob()
+      
+      // Double check it's actually a video
+      if (blob.type && blob.type.startsWith('video/')) {
+        const url = URL.createObjectURL(blob)
+        setCompressedVideoUrl(url)
+        setCompressedSize(blob.size)
+        setProgress(100)
+        setIsCompressing(false)
+      } else {
+        // Might be an error message in text format
+        const text = await blob.text()
+        try {
+          const errorJson = JSON.parse(text)
+          setError(errorJson.error || errorJson.details || errorJson.message || 'Compression failed')
+        } catch (e) {
+          setError(text || 'Compression failed - unexpected response format')
+        }
         setIsCompressing(false)
         setProgress(0)
       }
-
-      xhr.responseType = 'blob'
-      xhr.send(formData)
     } catch (error) {
       console.error('Error compressing video:', error)
-      setError(error.message || 'Failed to compress video')
+      setError(error.message || 'Failed to compress video. Please check your connection and try again.')
       setIsCompressing(false)
       setProgress(0)
     }
