@@ -2,8 +2,17 @@ import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 import { supabase, setupDatabase } from './database-supabase.js';
 import { analyzeAudio } from './audioAnalyzer.js';
+
+const require = createRequire(import.meta.url);
+const ffmpeg = require('fluent-ffmpeg');
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -11,12 +20,25 @@ const PORT = process.env.PORT || 3001;
 // Configure multer for file uploads (audio and video)
 const upload = multer({ 
   dest: 'uploads/',
-  limits: { fileSize: 1024 * 1024 * 1024 }, // 1GB limit for videos
+  limits: { fileSize: 5 * 1024 * 1024 * 1024 }, // 5GB limit for videos
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('audio/') || file.mimetype.startsWith('video/')) {
       cb(null, true);
     } else {
       cb(new Error('Only audio and video files are allowed'), false);
+    }
+  }
+});
+
+// Configure multer specifically for video compression (larger files)
+const videoUpload = multer({ 
+  dest: 'uploads/',
+  limits: { fileSize: 10 * 1024 * 1024 * 1024 }, // 10GB limit for video compression
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('video/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only video files are allowed'), false);
     }
   }
 });
@@ -668,6 +690,211 @@ app.delete('/api/analysis/:id', async (req, res) => {
   } catch (error) {
     console.error('Error deleting analysis:', error);
     res.status(500).json({ error: 'Failed to delete analysis' });
+  }
+});
+
+// ========== VIDEO COMPRESSION API ==========
+
+// Compress video to under 2GB while maintaining quality
+app.post('/api/compress-video', videoUpload.single('video'), async (req, res) => {
+  let inputPath = null;
+  let outputPath = null;
+
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No video file uploaded' });
+    }
+
+    // Check if ffmpeg is available
+    try {
+      await new Promise((resolve, reject) => {
+        ffmpeg.getAvailableCodecs((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+    } catch (ffmpegError) {
+      console.error('FFmpeg not available:', ffmpegError);
+      return res.status(500).json({ 
+        error: 'FFmpeg is not installed or not available on the server',
+        details: 'Please install FFmpeg on your system. Visit https://ffmpeg.org/download.html for installation instructions.'
+      });
+    }
+
+    inputPath = req.file.path;
+    const originalSize = req.file.size;
+    const targetSize = 2 * 1024 * 1024 * 1024; // 2GB in bytes
+    const outputDir = path.join(__dirname, 'uploads');
+    
+    // Generate output filename
+    const ext = path.extname(req.file.originalname) || '.mp4';
+    const baseName = path.basename(req.file.originalname, ext);
+    outputPath = path.join(outputDir, `${baseName}_compressed_${Date.now()}${ext}`);
+
+    console.log(`🎬 Compressing video: ${req.file.originalname} (${(originalSize / 1024 / 1024 / 1024).toFixed(2)} GB)`);
+
+    // If file is already under 2GB, we still compress it for optimization
+    // Calculate target bitrate to achieve ~1.8GB (90% of 2GB to be safe)
+    const targetFileSize = targetSize * 0.9; // 1.8GB
+    
+    // Get video duration first to calculate bitrate
+    const getVideoDuration = () => {
+      return new Promise((resolve, reject) => {
+        ffmpeg.ffprobe(inputPath, (err, metadata) => {
+          if (err) reject(err);
+          else resolve(metadata.format.duration);
+        });
+      });
+    };
+
+    const duration = await getVideoDuration();
+    console.log(`⏱️  Video duration: ${Math.floor(duration / 60)}:${Math.floor(duration % 60)}`);
+
+    // Calculate target bitrate (in kbps)
+    // Formula: bitrate (kbps) = (target_size_bytes * 8) / (duration_seconds * 1000)
+    // We reserve 128kbps for audio, so video bitrate = total - 128
+    const targetBitrateKbps = Math.floor((targetFileSize * 8) / (duration * 1000)) - 128;
+    
+    // Ensure minimum quality (at least 2000 kbps for good quality)
+    const videoBitrate = Math.max(targetBitrateKbps, 2000);
+    
+    console.log(`🎯 Target bitrate: ${videoBitrate} kbps`);
+
+    // Compress video with optimal settings
+    await new Promise((resolve, reject) => {
+      ffmpeg(inputPath)
+        .videoCodec('libx264') // H.264 codec
+        .audioCodec('aac') // AAC audio codec
+        .videoBitrate(videoBitrate) // Dynamic bitrate based on target size
+        .audioBitrate('128k') // High quality audio
+        .outputOptions([
+          '-preset slow', // Better compression efficiency
+          '-crf 23', // Constant Rate Factor for quality (18-28 range, 23 is good balance)
+          '-movflags +faststart', // Enable fast start for web playback
+          '-pix_fmt yuv420p', // Ensure compatibility
+          '-profile:v high', // H.264 high profile
+          '-level 4.0', // H.264 level
+          '-maxrate', `${videoBitrate * 1.2}k`, // Max bitrate (20% buffer)
+          '-bufsize', `${videoBitrate * 2}k`, // Buffer size
+        ])
+        .on('start', (commandLine) => {
+          console.log('🔄 FFmpeg command:', commandLine);
+        })
+        .on('progress', (progress) => {
+          if (progress.percent) {
+            console.log(`⏳ Compression progress: ${Math.round(progress.percent)}%`);
+          }
+        })
+        .on('end', () => {
+          console.log('✅ Compression complete');
+          resolve();
+        })
+        .on('error', (err) => {
+          console.error('❌ FFmpeg error:', err);
+          reject(err);
+        })
+        .save(outputPath);
+    });
+
+    // Check output file size
+    const stats = fs.statSync(outputPath);
+    const compressedSize = stats.size;
+    const compressionRatio = ((1 - compressedSize / originalSize) * 100).toFixed(1);
+
+    console.log(`📊 Original: ${(originalSize / 1024 / 1024 / 1024).toFixed(2)} GB`);
+    console.log(`📊 Compressed: ${(compressedSize / 1024 / 1024 / 1024).toFixed(2)} GB`);
+    console.log(`📊 Compression: ${compressionRatio}% reduction`);
+
+    // If still over 2GB, apply more aggressive compression
+    if (compressedSize > targetSize) {
+      console.log('⚠️  File still over 2GB, applying more aggressive compression...');
+      const tempPath = outputPath;
+      outputPath = path.join(outputDir, `${baseName}_compressed_aggressive_${Date.now()}${ext}`);
+      
+      // More aggressive settings
+      const aggressiveBitrate = Math.floor((targetFileSize * 8) / (duration * 1000)) - 128;
+      const finalBitrate = Math.max(aggressiveBitrate, 1500); // Minimum 1500 kbps
+
+      await new Promise((resolve, reject) => {
+        ffmpeg(tempPath)
+          .videoCodec('libx264')
+          .audioCodec('aac')
+          .videoBitrate(finalBitrate)
+          .audioBitrate('96k')
+          .outputOptions([
+            '-preset slow',
+            '-crf 26', // Slightly lower quality for more compression
+            '-movflags +faststart',
+            '-pix_fmt yuv420p',
+            '-profile:v high',
+            '-level 4.0',
+            '-maxrate', `${finalBitrate * 1.2}k`,
+            '-bufsize', `${finalBitrate * 2}k`,
+          ])
+          .on('end', () => {
+            // Clean up intermediate file
+            try {
+              fs.unlinkSync(tempPath);
+            } catch (e) {
+              console.log('Note: Could not delete temp file:', e.message);
+            }
+            resolve();
+          })
+          .on('error', reject)
+          .save(outputPath);
+      });
+
+      const finalStats = fs.statSync(outputPath);
+      console.log(`📊 Final size: ${(finalStats.size / 1024 / 1024 / 1024).toFixed(2)} GB`);
+    }
+
+    // Send compressed video file
+    res.setHeader('Content-Type', 'video/mp4');
+    res.setHeader('Content-Disposition', `attachment; filename="${path.basename(outputPath)}"`);
+    
+    const fileStream = fs.createReadStream(outputPath);
+    fileStream.pipe(res);
+
+    // Clean up files after sending
+    fileStream.on('end', () => {
+      try {
+        if (inputPath && fs.existsSync(inputPath)) {
+          fs.unlinkSync(inputPath);
+        }
+        if (outputPath && fs.existsSync(outputPath)) {
+          // Give it a moment before deleting output
+          setTimeout(() => {
+            try {
+              fs.unlinkSync(outputPath);
+            } catch (e) {
+              console.log('Note: Could not delete output file:', e.message);
+            }
+          }, 1000);
+        }
+      } catch (e) {
+        console.log('Note: Could not clean up files:', e.message);
+      }
+    });
+
+  } catch (error) {
+    console.error('Error compressing video:', error);
+    
+    // Clean up on error
+    try {
+      if (inputPath && fs.existsSync(inputPath)) {
+        fs.unlinkSync(inputPath);
+      }
+      if (outputPath && fs.existsSync(outputPath)) {
+        fs.unlinkSync(outputPath);
+      }
+    } catch (e) {
+      console.log('Note: Could not clean up files on error:', e.message);
+    }
+
+    res.status(500).json({ 
+      error: 'Failed to compress video', 
+      details: error.message 
+    });
   }
 });
 

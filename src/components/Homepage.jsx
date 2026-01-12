@@ -80,6 +80,15 @@ function Homepage() {
             <h2>Find your Style</h2>
             <p>Discover your comedy style and writing elements</p>
           </button>
+
+          <button 
+            className="option-card compress-option"
+            onClick={() => navigate('/compress-video')}
+          >
+            <div className="option-icon">🎬</div>
+            <h2>Compress video under 2 GB</h2>
+            <p>Reduce video file size while maintaining quality</p>
+          </button>
         </div>
       </div>
     </div>
