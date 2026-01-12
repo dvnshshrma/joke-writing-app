@@ -31,14 +31,16 @@ const upload = multer({
 });
 
 // Configure multer specifically for video compression (larger files)
+// Increased to 15GB to handle 8.7GB files with buffer
 const videoUpload = multer({ 
   dest: 'uploads/',
   limits: { 
-    fileSize: 10 * 1024 * 1024 * 1024, // 10GB limit for video compression
-    fieldSize: 10 * 1024 * 1024 * 1024, // 10GB for field size
+    fileSize: 15 * 1024 * 1024 * 1024, // 15GB limit for video compression (increased for 8.7GB files)
+    fieldSize: 15 * 1024 * 1024 * 1024, // 15GB for field size
     fields: 10, // Number of non-file fields
     fieldNameSize: 100, // Max field name size
-    files: 1 // Number of files
+    files: 1, // Number of files
+    parts: 100 // Max number of parts in multipart form
   },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('video/')) {
@@ -51,9 +53,11 @@ const videoUpload = multer({
 
 // Middleware
 app.use(cors());
-// Increase body size limits for large file uploads
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+// Increase body size limits for large file uploads (though multer handles multipart separately)
+// These are for JSON/URL-encoded requests, but set high to avoid any conflicts
+// Note: For multipart/form-data (file uploads), multer handles it independently
+app.use(express.json({ limit: '15gb' }));
+app.use(express.urlencoded({ extended: true, limit: '15gb' }));
 
 // Auth middleware to extract user from JWT
 const extractUser = async (req, res, next) => {
@@ -705,14 +709,29 @@ app.delete('/api/analysis/:id', async (req, res) => {
 
 // Compress video to under 2GB while maintaining quality
 app.post('/api/compress-video', (req, res, next) => {
+  // Log request info for debugging
+  const contentLength = req.headers['content-length'];
+  if (contentLength) {
+    const sizeMB = (parseInt(contentLength) / 1024 / 1024).toFixed(2);
+    const sizeGB = (parseInt(contentLength) / 1024 / 1024 / 1024).toFixed(2);
+    console.log(`📥 Incoming request: ${sizeMB} MB (${sizeGB} GB)`);
+  }
+  
   videoUpload.single('video')(req, res, (err) => {
     if (err) {
-      console.error('Multer upload error:', err);
+      console.error('❌ Multer upload error:', err);
+      console.error('❌ Error code:', err.code);
+      console.error('❌ Error message:', err.message);
+      
       if (err.code === 'LIMIT_FILE_SIZE') {
+        const maxSizeGB = (15 * 1024 * 1024 * 1024 / 1024 / 1024 / 1024).toFixed(0);
+        const fileSizeGB = contentLength ? (parseInt(contentLength) / 1024 / 1024 / 1024).toFixed(2) : 'unknown';
         return res.status(413).json({ 
           error: 'File too large', 
-          details: `Maximum file size is 10GB. Your file appears to be larger than this limit.`,
-          maxSize: '10GB'
+          details: `Maximum file size is ${maxSizeGB}GB. Your file (${fileSizeGB}GB) appears to be larger than this limit.`,
+          maxSize: `${maxSizeGB}GB`,
+          currentLimit: '15GB',
+          yourFileSize: `${fileSizeGB}GB`
         });
       }
       if (err.code === 'LIMIT_UNEXPECTED_FILE') {
@@ -721,9 +740,34 @@ app.post('/api/compress-video', (req, res, next) => {
           details: 'Please use the field name "video" for the file upload.'
         });
       }
+      if (err.code === 'LIMIT_PART_COUNT') {
+        return res.status(413).json({ 
+          error: 'Too many parts', 
+          details: 'The request contains too many parts. Please upload a single video file.'
+        });
+      }
+      if (err.code === 'LIMIT_FIELD_KEY') {
+        return res.status(413).json({ 
+          error: 'Field name too long', 
+          details: 'The field name is too long.'
+        });
+      }
+      if (err.code === 'LIMIT_FIELD_VALUE') {
+        return res.status(413).json({ 
+          error: 'Field value too large', 
+          details: 'A field value is too large.'
+        });
+      }
+      if (err.code === 'LIMIT_FIELD_COUNT') {
+        return res.status(413).json({ 
+          error: 'Too many fields', 
+          details: 'The request contains too many fields.'
+        });
+      }
       return res.status(400).json({ 
         error: 'File upload error', 
-        details: err.message 
+        details: err.message,
+        code: err.code
       });
     }
     next();
