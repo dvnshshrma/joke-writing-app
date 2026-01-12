@@ -33,7 +33,13 @@ const upload = multer({
 // Configure multer specifically for video compression (larger files)
 const videoUpload = multer({ 
   dest: 'uploads/',
-  limits: { fileSize: 10 * 1024 * 1024 * 1024 }, // 10GB limit for video compression
+  limits: { 
+    fileSize: 10 * 1024 * 1024 * 1024, // 10GB limit for video compression
+    fieldSize: 10 * 1024 * 1024 * 1024, // 10GB for field size
+    fields: 10, // Number of non-file fields
+    fieldNameSize: 100, // Max field name size
+    files: 1 // Number of files
+  },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('video/')) {
       cb(null, true);
@@ -45,7 +51,9 @@ const videoUpload = multer({
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+// Increase body size limits for large file uploads
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Auth middleware to extract user from JWT
 const extractUser = async (req, res, next) => {
@@ -696,7 +704,31 @@ app.delete('/api/analysis/:id', async (req, res) => {
 // ========== VIDEO COMPRESSION API ==========
 
 // Compress video to under 2GB while maintaining quality
-app.post('/api/compress-video', videoUpload.single('video'), async (req, res) => {
+app.post('/api/compress-video', (req, res, next) => {
+  videoUpload.single('video')(req, res, (err) => {
+    if (err) {
+      console.error('Multer upload error:', err);
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({ 
+          error: 'File too large', 
+          details: `Maximum file size is 10GB. Your file appears to be larger than this limit.`,
+          maxSize: '10GB'
+        });
+      }
+      if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+        return res.status(400).json({ 
+          error: 'Unexpected file field', 
+          details: 'Please use the field name "video" for the file upload.'
+        });
+      }
+      return res.status(400).json({ 
+        error: 'File upload error', 
+        details: err.message 
+      });
+    }
+    next();
+  });
+}, async (req, res) => {
   let inputPath = null;
   let outputPath = null;
 
