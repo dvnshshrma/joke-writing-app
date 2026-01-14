@@ -1,6 +1,10 @@
 import fetch from 'node-fetch';
 import fs from 'fs';
+import dotenv from 'dotenv';
 import { kmeans } from 'ml-kmeans';
+
+// Load environment variables
+dotenv.config();
 
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -569,7 +573,7 @@ function generateSmartHeader(jokeText, index, topic) {
  * Minimum: 4 jokes for a 7-minute set (~1 joke per 1.5-2 minutes)
  * Uses AI to classify jokes into topics
  */
-async function extractJokesFromTranscript(transcript, excludeStart = 0, excludeEnd = 0) {
+export async function extractJokesFromTranscript(transcript, excludeStart = 0, excludeEnd = 0) {
   const words = transcript.words || [];
   const sentences = transcript.sentences || [];
   const chapters = transcript.chapters || [];
