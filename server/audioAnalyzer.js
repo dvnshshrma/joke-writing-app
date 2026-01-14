@@ -1,5 +1,6 @@
 import fetch from 'node-fetch';
 import fs from 'fs';
+import { kmeans } from 'ml-kmeans';
 
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -133,7 +134,176 @@ function classifyJokeTopic(text) {
 }
 
 /**
- * Classify jokes using OpenAI AI analysis
+ * Calculate Euclidean distance between two vectors
+ */
+function euclideanDistance(a, b) {
+  if (a.length !== b.length) {
+    throw new Error('Vectors must have the same length');
+  }
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) {
+    sum += Math.pow(a[i] - b[i], 2);
+  }
+  return Math.sqrt(sum);
+}
+
+/**
+ * Get embeddings for joke texts using OpenAI
+ */
+async function getEmbeddings(texts) {
+  if (!OPENAI_API_KEY || OPENAI_API_KEY === 'your_openai_api_key_here') {
+    throw new Error('OpenAI API key required for embeddings');
+  }
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/embeddings', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'text-embedding-3-small',
+        input: texts
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(`OpenAI embeddings error: ${response.status} - ${errorData.error?.message || response.statusText}`);
+    }
+
+    const data = await response.json();
+    return data.data.map(item => item.embedding);
+  } catch (error) {
+    console.error('Failed to get embeddings:', error);
+    throw error;
+  }
+}
+
+/**
+ * Calculate silhouette score for cluster validation
+ */
+function calculateSilhouetteScore(embeddings, labels, centers) {
+  const n = embeddings.length;
+  if (n <= 1 || new Set(labels).size <= 1) return -1;
+
+  let totalScore = 0;
+  
+  for (let i = 0; i < n; i++) {
+    const point = embeddings[i];
+    const label = labels[i];
+    
+    // Calculate average distance to points in same cluster
+    const sameClusterPoints = embeddings.filter((_, idx) => labels[idx] === label && idx !== i);
+    const a = sameClusterPoints.length > 0
+      ? sameClusterPoints.reduce((sum, p) => sum + euclideanDistance(point, p), 0) / sameClusterPoints.length
+      : 0;
+    
+    // Calculate minimum average distance to other clusters
+    const otherClusters = [...new Set(labels)].filter(l => l !== label);
+    if (otherClusters.length === 0) {
+      totalScore += 0;
+      continue;
+    }
+    
+    const otherClusterDistances = otherClusters.map(clusterLabel => {
+      const clusterPoints = embeddings.filter((_, idx) => labels[idx] === clusterLabel);
+      return clusterPoints.reduce((sum, p) => sum + euclideanDistance(point, p), 0) / clusterPoints.length;
+    });
+    
+    const b = Math.min(...otherClusterDistances);
+    
+    totalScore += (b - a) / Math.max(a, b);
+  }
+  
+  return totalScore / n;
+}
+
+/**
+ * Perform topic modeling using embeddings and clustering with gridsearch
+ */
+async function performTopicModeling(jokes, minClusters = 2, maxClusters = 8) {
+  if (!jokes || jokes.length === 0) {
+    return jokes.map(j => ({ ...j, topic: 'General', cluster: 0 }));
+  }
+
+  try {
+    // Get embeddings for all joke texts
+    const texts = jokes.map(j => (j.text || j.summary || '').substring(0, 8000));
+    console.log(`🔍 Getting embeddings for ${texts.length} jokes...`);
+    
+    const embeddings = await getEmbeddings(texts);
+    console.log(`✅ Got ${embeddings.length} embeddings (dimension: ${embeddings[0]?.length || 0})`);
+
+    // Gridsearch for optimal number of clusters
+    let bestScore = -Infinity;
+    let bestResult = null;
+    let bestK = minClusters;
+
+    const kRange = Math.min(maxClusters, Math.max(minClusters, Math.floor(jokes.length / 2)));
+    
+    for (let k = minClusters; k <= Math.min(kRange, jokes.length); k++) {
+      if (k > embeddings.length) break;
+      
+      try {
+        const result = kmeans(embeddings, k, { initialization: 'kmeans++', maxIterations: 300 });
+        
+        // Calculate silhouette score
+        const score = calculateSilhouetteScore(embeddings, result.clusters, result.centroids);
+        
+        console.log(`📊 K=${k}: Silhouette score = ${score.toFixed(4)}`);
+        
+        if (score > bestScore) {
+          bestScore = score;
+          bestResult = result;
+          bestK = k;
+        }
+      } catch (err) {
+        console.log(`⚠️ K=${k} failed: ${err.message}`);
+      }
+    }
+
+    if (!bestResult) {
+      console.log('⚠️ Clustering failed, using single cluster');
+      return jokes.map(j => ({ ...j, topic: 'General', cluster: 0 }));
+    }
+
+    console.log(`✅ Best clustering: K=${bestK} (score: ${bestScore.toFixed(4)})`);
+
+    // Assign clusters to jokes
+    const clusteredJokes = jokes.map((joke, idx) => ({
+      ...joke,
+      cluster: bestResult.clusters[idx]
+    }));
+
+    return clusteredJokes;
+  } catch (error) {
+    console.error('⚠️ Topic modeling failed:', error.message);
+    // Fallback: assign all to same cluster
+    return jokes.map(j => ({ ...j, topic: 'General', cluster: 0 }));
+  }
+}
+
+/**
+ * Validate and truncate header to max 5 words
+ */
+function validateHeader(header, maxWords = 5) {
+  if (!header) return '';
+  
+  const words = header.trim().split(/\s+/);
+  if (words.length <= maxWords) {
+    return header.trim();
+  }
+  
+  // Take first maxWords words
+  const truncated = words.slice(0, maxWords).join(' ');
+  console.log(`⚠️ Header truncated from "${header}" to "${truncated}"`);
+  return truncated;
+}
+
+/**
+ * Classify jokes using OpenAI AI analysis with topic modeling
  * Groups jokes by topic and generates headers for each topic
  * Falls back to keyword-based classification if OpenAI is unavailable
  */
@@ -143,58 +313,72 @@ async function classifyJokesWithAI(jokes) {
     return jokes;
   }
 
+  // First, perform topic modeling to get clusters
+  let clusteredJokes;
+  try {
+    clusteredJokes = await performTopicModeling(jokes);
+  } catch (error) {
+    console.error('⚠️ Topic modeling failed, continuing without clustering:', error.message);
+    clusteredJokes = jokes.map((j, idx) => ({ ...j, cluster: 0 }));
+  }
+
   // If OpenAI API key is not available, use keyword-based fallback
   if (!OPENAI_API_KEY || OPENAI_API_KEY === 'your_openai_api_key_here') {
     console.log('ℹ️ OpenAI API key not found, using keyword-based topic classification');
-    return jokes.map(joke => ({
-      ...joke,
-      topic: classifyJokeTopic(joke.text || joke.summary || ''),
-      header: joke.header || generateSmartHeader(joke.text || joke.summary || '', joke.index || 0, classifyJokeTopic(joke.text || joke.summary || ''))
-    }));
+    return clusteredJokes.map(joke => {
+      const topic = classifyJokeTopic(joke.text || joke.summary || '');
+      const header = joke.header || generateSmartHeader(joke.text || joke.summary || '', joke.index || 0, topic);
+      return {
+        ...joke,
+        topic: topic,
+        header: validateHeader(header)
+      };
+    });
   }
 
   try {
     console.log(`🤖 Using OpenAI to classify ${jokes.length} jokes into topics...`);
     
-    // Prepare joke texts with indices for the prompt
+    // Prepare joke texts with indices and clusters
     const jokesList = jokes.map((joke, idx) => {
-      const text = joke.text || joke.summary || '';
-      return `Joke ${joke.index !== undefined ? joke.index : idx}: "${text.substring(0, 500)}"`;
+      const text = (joke.text || joke.summary || '').substring(0, 600);
+      const cluster = clusteredJokes[idx]?.cluster ?? 0;
+      return `Joke ${joke.index !== undefined ? joke.index : idx} [Cluster ${cluster}]: "${text}"`;
     }).join('\n\n');
 
-    const prompt = `You are analyzing a stand-up comedy set transcript. I've extracted ${jokes.length} joke segments from a performance.
+    const prompt = `You are an expert comedy analyst analyzing a stand-up comedy performance transcript. ${jokes.length} joke segments have been extracted and pre-clustered using topic modeling.
 
-Your task:
-1. Identify the main topics/themes in these jokes (e.g., "Dating", "Work Life", "Family", "Technology", "Social Media", etc.)
-2. Group similar jokes together by topic
-3. Generate concise, descriptive headers for each topic/group (2-5 words, comedy-style titles)
-4. Assign each joke to a topic group
+YOUR TASK:
+1. Analyze each joke segment for its core topic/theme
+2. Verify and refine the pre-clustering by grouping semantically similar jokes
+3. Generate concise, witty headers for each topic group (MAXIMUM 5 WORDS each)
+4. Ensure headers are comedy-style titles that capture the essence of the topic
 
-Return ONLY a valid JSON object in this exact format (no markdown, no code blocks, just raw JSON):
+CRITICAL REQUIREMENTS:
+- Headers MUST be 5 words or fewer (strictly enforced)
+- Headers should be descriptive yet punchy (comedy-style)
+- Group jokes by semantic meaning, not just keywords
+- Each joke must appear in exactly one topic group
+- Include ALL joke indices (0 to ${jokes.length - 1})
+
+Return ONLY valid JSON in this exact format (no markdown, no code blocks, just raw JSON):
 {
   "topics": {
     "topic_1": {
-      "header": "Dating in Modern Times",
+      "header": "Dating Struggles",
       "jokeIndices": [0, 3, 5]
     },
     "topic_2": {
-      "header": "Work Life Struggles",
-      "jokeIndices": [1, 4]
+      "header": "Work Life Balance",
+      "jokeIndices": [1, 4, 7]
     }
   }
 }
 
-Rules:
-- Each joke index must appear in exactly one topic's jokeIndices array
-- Include ALL joke indices (0 to ${jokes.length - 1})
-- Headers should be 2-5 words, descriptive, comedy-style
-- Group jokes by semantic similarity, not just keywords
-- Create 2-8 topics (fewer if jokes are very similar, more if diverse)
-
-Jokes to analyze:
+Jokes to analyze (pre-clustered):
 ${jokesList}
 
-Return the JSON now:`;
+Remember: Headers must be ≤5 words. Return JSON now:`;
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -203,19 +387,20 @@ Return the JSON now:`;
         'Authorization': `Bearer ${OPENAI_API_KEY}`
       },
       body: JSON.stringify({
-        model: 'gpt-3.5-turbo',
+        model: 'gpt-4o-mini',
         messages: [
           {
             role: 'system',
-            content: 'You are an expert comedy analyst. Analyze joke segments and classify them into topics. Return only valid JSON, no markdown formatting.'
+            content: 'You are an expert comedy analyst. Analyze joke segments, group them by topic, and generate concise headers (≤5 words). Always return valid JSON without markdown formatting. Headers must be exactly 5 words or fewer.'
           },
           {
             role: 'user',
             content: prompt
           }
         ],
-        temperature: 0.7,
-        max_tokens: 2000
+        temperature: 0.5,
+        max_tokens: 3000,
+        response_format: { type: 'json_object' }
       })
     });
 
@@ -227,14 +412,19 @@ Return the JSON now:`;
     const data = await response.json();
     const content = data.choices[0]?.message?.content?.trim() || '';
     
-    // Extract JSON from response (handle markdown code blocks if present)
-    let jsonContent = content;
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      jsonContent = jsonMatch[0];
+    // Parse JSON (handle both json_object format and text responses)
+    let classification;
+    try {
+      classification = JSON.parse(content);
+    } catch (parseError) {
+      // Fallback: extract JSON from markdown if present
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        classification = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error('Failed to parse OpenAI response');
+      }
     }
-
-    const classification = JSON.parse(jsonContent);
     
     // Create a map of joke index to topic
     const jokeIndexToTopic = {};
@@ -242,7 +432,7 @@ Return the JSON now:`;
     
     if (classification.topics) {
       Object.entries(classification.topics).forEach(([topicKey, topicData]) => {
-        const header = topicData.header || topicKey;
+        const header = validateHeader(topicData.header || topicKey);
         topicHeaders[topicKey] = header;
         if (topicData.jokeIndices && Array.isArray(topicData.jokeIndices)) {
           topicData.jokeIndices.forEach(jokeIdx => {
@@ -256,23 +446,24 @@ Return the JSON now:`;
     }
 
     // Assign topics to jokes
-    const classifiedJokes = jokes.map(joke => {
-      const jokeIdx = joke.index !== undefined ? joke.index : jokes.indexOf(joke);
+    const classifiedJokes = jokes.map((joke, idx) => {
+      const jokeIdx = joke.index !== undefined ? joke.index : idx;
       const topicInfo = jokeIndexToTopic[jokeIdx];
       
       if (topicInfo) {
         return {
           ...joke,
           topic: topicInfo.topic,
-          header: joke.header || topicInfo.header
+          header: validateHeader(joke.header || topicInfo.header)
         };
       } else {
         // Fallback if joke index not found in classification
         const fallbackTopic = classifyJokeTopic(joke.text || joke.summary || '');
+        const fallbackHeader = generateSmartHeader(joke.text || joke.summary || '', jokeIdx, fallbackTopic);
         return {
           ...joke,
           topic: fallbackTopic,
-          header: joke.header || generateSmartHeader(joke.text || joke.summary || '', jokeIdx, fallbackTopic)
+          header: validateHeader(fallbackHeader)
         };
       }
     });
@@ -283,12 +474,13 @@ Return the JSON now:`;
   } catch (error) {
     console.error('⚠️ OpenAI classification failed, using keyword-based fallback:', error.message);
     // Fallback to keyword-based classification
-    return jokes.map(joke => {
+    return clusteredJokes.map(joke => {
       const fallbackTopic = classifyJokeTopic(joke.text || joke.summary || '');
+      const fallbackHeader = generateSmartHeader(joke.text || joke.summary || '', joke.index || 0, fallbackTopic);
       return {
         ...joke,
         topic: fallbackTopic,
-        header: joke.header || generateSmartHeader(joke.text || joke.summary || '', joke.index || 0, fallbackTopic)
+        header: validateHeader(fallbackHeader)
       };
     });
   }
@@ -320,31 +512,38 @@ function extractKeyPhrase(text) {
 }
 
 /**
- * Generate intelligent joke header using topic classification
+ * Generate intelligent joke header using topic classification (max 5 words)
  */
 function generateSmartHeader(jokeText, index, topic) {
-  // Try to extract a key phrase first
+  // Extract key phrase first
   const keyPhrase = extractKeyPhrase(jokeText);
-  if (keyPhrase && keyPhrase.length > 5 && keyPhrase.length < 50) {
-    // Capitalize first letter
-    return keyPhrase.charAt(0).toUpperCase() + keyPhrase.slice(1);
-  }
-  
-  // Use first sentence if it's a good length
-  const sentences = jokeText.match(/[^.!?]+[.!?]+/g) || [];
-  if (sentences.length > 0) {
-    let firstSentence = sentences[0].trim();
-    if (firstSentence.length > 10 && firstSentence.length < 60) {
-      return firstSentence;
-    }
-    // Truncate if too long
-    if (firstSentence.length >= 60) {
-      return firstSentence.substring(0, 50).trim() + '...';
+  if (keyPhrase) {
+    const words = keyPhrase.trim().split(/\s+/);
+    if (words.length <= 5) {
+      // Capitalize first letter
+      return words.join(' ').charAt(0).toUpperCase() + words.join(' ').slice(1);
+    } else {
+      // Take first 5 words
+      return words.slice(0, 5).join(' ');
     }
   }
   
-  // Fall back to topic-based header
-  return `${topic} Bit`;
+  // Try to create header from first sentence
+  const firstSentence = jokeText.split(/[.!?]/)[0];
+  if (firstSentence) {
+    const words = firstSentence.trim().split(/\s+/);
+    if (words.length <= 8) {
+      // Take key words (skip common words)
+      const stopWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'can']);
+      const keyWords = words.filter(w => !stopWords.has(w.toLowerCase())).slice(0, 5);
+      if (keyWords.length > 0) {
+        return keyWords.join(' ');
+      }
+    }
+  }
+  
+  // Fall back to topic-based header (ensure ≤5 words)
+  return validateHeader(`${topic} Bit`);
 }
 
 /**
@@ -373,7 +572,7 @@ async function extractJokesFromTranscript(transcript, excludeStart = 0, excludeE
       const text = chapter.gist || chapter.summary || '';
       return {
         index: i,
-        header: chapter.headline || '',
+        header: validateHeader(chapter.headline || ''),
         summary: chapter.summary || '',
         text: text,
         startTime: chapter.start / 1000,
@@ -381,71 +580,91 @@ async function extractJokesFromTranscript(transcript, excludeStart = 0, excludeE
         duration: (chapter.end - chapter.start) / 1000
       };
     });
-    // Classify jokes using AI
+    // Classify jokes using AI with topic modeling
     return await classifyJokesWithAI(extractedJokes);
   }
   
-  // Detect jokes using silence gaps (laugh breaks)
-  console.log('🔍 Detecting jokes from silence gaps and topic changes...');
+  // Enhanced joke detection using multiple signals
+  console.log('🔍 Detecting jokes using multiple signals (silence, sentiment, topic changes)...');
   
   let jokes = [];
-  let currentJokeStart = excludeStart * 1000;
-  let currentJokeWords = [];
-  let jokeIndex = 0;
-  
-  // Collect all silence gaps with their positions
   const silenceGaps = [];
+  const sentimentShifts = transcript.sentiment_analysis_results || [];
+  
+  // Collect silence gaps
   for (let i = 1; i < words.length; i++) {
     const prevWord = words[i - 1];
     const currWord = words[i];
     const gap = currWord.start - prevWord.end;
     
-    if (gap > 1500) { // 1.5+ second gap
+    if (gap > 1200) { // 1.2+ second gap (lowered threshold for better detection)
       silenceGaps.push({
         position: prevWord.end,
         gap: gap,
-        wordIndex: i - 1
+        wordIndex: i - 1,
+        weight: Math.min(5, gap / 1000) // Weight by gap duration
       });
     }
   }
   
-  // Sort gaps by size (largest first) and take top ones (between min and max jokes)
-  const sortedGaps = [...silenceGaps].sort((a, b) => b.gap - a.gap);
-  const numGapsToUse = Math.min(maxJokes - 1, Math.max(minJokes - 1, sortedGaps.length));
-  const selectedGaps = sortedGaps.slice(0, numGapsToUse);
-  // Re-sort by position for chronological processing
-  selectedGaps.sort((a, b) => a.position - b.position);
+  // Collect sentiment shifts
+  const significantSentimentShifts = [];
+  for (let i = 1; i < sentimentShifts.length; i++) {
+    const prev = sentimentShifts[i - 1];
+    const curr = sentimentShifts[i];
+    if (prev.sentiment !== curr.sentiment && curr.confidence > 0.7) {
+      significantSentimentShifts.push({
+        position: curr.start * 1000,
+        type: curr.sentiment,
+        confidence: curr.confidence,
+        weight: 2
+      });
+    }
+  }
   
-  console.log(`🎯 Found ${silenceGaps.length} gaps, using top ${selectedGaps.length} for joke boundaries`);
+  // Combine signals and sort by position
+  const allSignals = [
+    ...silenceGaps.map(g => ({ ...g, type: 'silence' })),
+    ...significantSentimentShifts.map(s => ({ ...s, type: 'sentiment' }))
+  ].sort((a, b) => a.position - b.position);
   
-  // Build jokes from gaps
+  // Use weighted selection of boundaries
+  const sortedSignals = [...allSignals].sort((a, b) => b.weight - a.weight);
+  const numSignalsToUse = Math.min(maxJokes - 1, Math.max(minJokes - 1, Math.floor(sortedSignals.length * 0.6)));
+  const selectedSignals = sortedSignals.slice(0, numSignalsToUse);
+  selectedSignals.sort((a, b) => a.position - b.position);
+  
+  console.log(`🎯 Found ${silenceGaps.length} silence gaps, ${significantSentimentShifts.length} sentiment shifts, using ${selectedSignals.length} boundaries`);
+  
+  // Build jokes from signals
   let lastEndPosition = excludeStart * 1000;
+  let jokeIndex = 0;
   
-  for (const gap of selectedGaps) {
+  for (const signal of selectedSignals) {
     const jokeWords = words.filter(w => 
-      w.start >= lastEndPosition && w.end <= gap.position
+      w.start >= lastEndPosition && w.end <= signal.position
     ).map(w => w.text);
     
-    if (jokeWords.length > 5) {
+    if (jokeWords.length > 10) { // Increased minimum words for better quality
       const jokeText = jokeWords.join(' ');
       
       jokes.push({
         index: jokeIndex,
         text: jokeText,
         startTime: lastEndPosition / 1000,
-        endTime: gap.position / 1000,
-        duration: (gap.position - lastEndPosition) / 1000,
-        laughGap: gap.gap / 1000
+        endTime: signal.position / 1000,
+        duration: (signal.position - lastEndPosition) / 1000,
+        signalType: signal.type
       });
       jokeIndex++;
     }
     
-    lastEndPosition = gap.position + gap.gap;
+    lastEndPosition = signal.position;
   }
   
   // Add final segment
   const finalWords = words.filter(w => w.start >= lastEndPosition).map(w => w.text);
-  if (finalWords.length > 5) {
+  if (finalWords.length > 10) {
     const jokeText = finalWords.join(' ');
     jokes.push({
       index: jokeIndex,
@@ -456,9 +675,9 @@ async function extractJokesFromTranscript(transcript, excludeStart = 0, excludeE
     });
   }
   
-  // If still not enough jokes, split evenly by time (use minJokes count)
+  // If still not enough jokes, use intelligent time-based splitting
   if (jokes.length < minJokes) {
-    console.log(`⚠️ Only found ${jokes.length} jokes, splitting to ensure ${minJokes} minimum...`);
+    console.log(`⚠️ Only found ${jokes.length} jokes, using intelligent time-splitting...`);
     jokes = [];
     const targetJokes = Math.min(minJokes, maxJokes);
     const chunkSize = effectiveDuration / targetJokes;
@@ -471,7 +690,7 @@ async function extractJokesFromTranscript(transcript, excludeStart = 0, excludeE
         w.start / 1000 >= startTime && w.start / 1000 < endTime
       ).map(w => w.text);
       
-      if (chunkWords.length > 3) {
+      if (chunkWords.length > 5) {
         const jokeText = chunkWords.join(' ');
         jokes.push({
           index: i,
@@ -484,9 +703,9 @@ async function extractJokesFromTranscript(transcript, excludeStart = 0, excludeE
     }
   }
   
-  // Classify all extracted jokes using AI
+  // Use topic modeling + AI classification
   const classifiedJokes = await classifyJokesWithAI(jokes);
-  console.log(`🎭 Extracted ${classifiedJokes.length} jokes with topics: ${[...new Set(classifiedJokes.map(j => j.topic))].join(', ')}`);
+  console.log(`🎭 Extracted ${classifiedJokes.length} jokes with topics`);
   return classifiedJokes;
 }
 
