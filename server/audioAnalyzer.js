@@ -152,10 +152,14 @@ function euclideanDistance(a, b) {
  */
 async function getEmbeddings(texts) {
   if (!OPENAI_API_KEY || OPENAI_API_KEY === 'your_openai_api_key_here') {
-    throw new Error('OpenAI API key required for embeddings');
+    console.error('❌ OpenAI API key not configured for embeddings');
+    throw new Error('OpenAI API key required for embeddings. Please set OPENAI_API_KEY environment variable.');
   }
 
+  console.log(`🔑 Using OpenAI API key (length: ${OPENAI_API_KEY.length})`);
+
   try {
+    console.log(`📤 Sending ${texts.length} texts to OpenAI embeddings API...`);
     const response = await fetch('https://api.openai.com/v1/embeddings', {
       method: 'POST',
       headers: {
@@ -170,13 +174,16 @@ async function getEmbeddings(texts) {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
+      console.error(`❌ OpenAI embeddings API error: ${response.status}`, errorData);
       throw new Error(`OpenAI embeddings error: ${response.status} - ${errorData.error?.message || response.statusText}`);
     }
 
     const data = await response.json();
+    console.log(`✅ Received ${data.data?.length || 0} embeddings from OpenAI`);
     return data.data.map(item => item.embedding);
   } catch (error) {
-    console.error('Failed to get embeddings:', error);
+    console.error('❌ Failed to get embeddings:', error.message);
+    console.error('❌ Error details:', error);
     throw error;
   }
 }
@@ -225,6 +232,13 @@ function calculateSilhouetteScore(embeddings, labels, centers) {
  */
 async function performTopicModeling(jokes, minClusters = 2, maxClusters = 8) {
   if (!jokes || jokes.length === 0) {
+    console.log('⚠️ No jokes provided for topic modeling');
+    return jokes.map(j => ({ ...j, topic: 'General', cluster: 0 }));
+  }
+
+  // If only 1 joke, can't cluster
+  if (jokes.length === 1) {
+    console.log('⚠️ Only 1 joke, skipping clustering');
     return jokes.map(j => ({ ...j, topic: 'General', cluster: 0 }));
   }
 
@@ -232,6 +246,7 @@ async function performTopicModeling(jokes, minClusters = 2, maxClusters = 8) {
     // Get embeddings for all joke texts
     const texts = jokes.map(j => (j.text || j.summary || '').substring(0, 8000));
     console.log(`🔍 Getting embeddings for ${texts.length} jokes...`);
+    console.log(`📝 Sample text: "${texts[0]?.substring(0, 100)}..."`);
     
     const embeddings = await getEmbeddings(texts);
     console.log(`✅ Got ${embeddings.length} embeddings (dimension: ${embeddings[0]?.length || 0})`);
@@ -316,9 +331,12 @@ async function classifyJokesWithAI(jokes) {
   // First, perform topic modeling to get clusters
   let clusteredJokes;
   try {
+    console.log(`🎯 Starting topic modeling for ${jokes.length} jokes...`);
     clusteredJokes = await performTopicModeling(jokes);
+    console.log(`✅ Topic modeling completed. Clusters assigned.`);
   } catch (error) {
     console.error('⚠️ Topic modeling failed, continuing without clustering:', error.message);
+    console.error('⚠️ Error stack:', error.stack);
     clusteredJokes = jokes.map((j, idx) => ({ ...j, cluster: 0 }));
   }
 
