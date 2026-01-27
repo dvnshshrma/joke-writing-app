@@ -31,9 +31,15 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_API
 // Log OpenAI availability (for debugging)
 if (OPENAI_API_KEY) {
   console.log('✅ OpenAI API key found - will use GPT for style classification');
+  console.log(`✅ OpenAI API key length: ${OPENAI_API_KEY.length}`);
 } else {
-  console.log('ℹ️  OpenAI API key not found - using keyword-based classification');
+  console.log('❌ OpenAI API key NOT FOUND - using keyword-based classification');
   console.log('   Set OPENAI_API_KEY environment variable for more accurate results');
+  console.log('   Current env vars:', {
+    hasOpenAI: !!OPENAI_API_KEY,
+    hasAssemblyAI: !!ASSEMBLYAI_API_KEY,
+    hasSupabase: !!supabaseUrl
+  });
 }
 
 // ---------- Analysis helpers (serverless / mock) ----------
@@ -370,10 +376,18 @@ function euclideanDistance(a, b) {
 async function getEmbeddings(texts) {
   if (!OPENAI_API_KEY || OPENAI_API_KEY === 'your_openai_api_key_here') {
     console.error('❌ OpenAI API key not configured for embeddings');
-    throw new Error('OpenAI API key required for embeddings. Please set OPENAI_API_KEY environment variable.');
+    console.error('❌ DEBUG - Environment check:', {
+      OPENAI_API_KEY_exists: !!process.env.OPENAI_API_KEY,
+      OPENAI_API_KEY_length: process.env.OPENAI_API_KEY?.length || 0,
+      VITE_OPENAI_API_KEY_exists: !!process.env.VITE_OPENAI_API_KEY,
+      OPENAI_API_KEY_var: !!OPENAI_API_KEY,
+      OPENAI_API_KEY_isPlaceholder: OPENAI_API_KEY === 'your_openai_api_key_here'
+    });
+    throw new Error('OpenAI API key required for embeddings. Please set OPENAI_API_KEY environment variable in Vercel dashboard.');
   }
 
   console.log(`🔑 Using OpenAI API key (length: ${OPENAI_API_KEY.length})`);
+  console.log(`🔑 Key preview: ${OPENAI_API_KEY.substring(0, 10)}...${OPENAI_API_KEY.substring(OPENAI_API_KEY.length - 4)}`);
 
   try {
     console.log(`📤 Sending ${texts.length} texts to OpenAI embeddings API...`);
@@ -544,16 +558,26 @@ const classifyJokesWithAI = async (segments) => {
   let clusteredSegments;
   try {
     console.log(`🎯 Starting topic modeling for ${segments.length} segments...`);
+    console.log(`🔍 OPENAI_API_KEY available: ${!!OPENAI_API_KEY} (length: ${OPENAI_API_KEY?.length || 0})`);
+    console.log(`🔍 First segment sample: "${(segments[0]?.text || '').substring(0, 100)}..."`);
     clusteredSegments = await performTopicModeling(segments);
     console.log(`✅ Topic modeling completed. Clusters assigned.`);
+    const clusterCounts = clusteredSegments.reduce((acc, s) => {
+      acc[s.cluster] = (acc[s.cluster] || 0) + 1;
+      return acc;
+    }, {});
+    console.log(`📊 Cluster distribution:`, clusterCounts);
   } catch (error) {
-    console.error('⚠️ Topic modeling failed, continuing without clustering:', error.message);
+    console.error('❌ Topic modeling failed, continuing without clustering:', error.message);
+    console.error('❌ Error stack:', error.stack);
     clusteredSegments = segments.map((s, idx) => ({ ...s, cluster: 0 }));
   }
 
   // If OpenAI API key is not available, use fallback topic extraction
   if (!OPENAI_API_KEY || OPENAI_API_KEY === 'your_openai_api_key_here') {
-    console.log('ℹ️ OpenAI API key not found, using keyword-based topic extraction');
+    console.log('❌ OpenAI API key not found, using keyword-based topic extraction');
+    console.log('❌ This means topic modeling with embeddings will not work!');
+    console.log('❌ Please add OPENAI_API_KEY to Vercel environment variables');
     return clusteredSegments.map(segment => ({
       ...segment,
       matchedHeader: validateHeader(extractSegmentTopic(segment.text || '', new Set()) || `Joke ${segment.index + 1}`),
