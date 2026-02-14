@@ -5,19 +5,16 @@ Topic modeling is not working on the deployed app even after redeployment.
 
 ## Most Common Causes
 
-### 1. ❌ Topic Modeling API Keys Not Set in Vercel (MOST LIKELY)
-Topic modeling uses a **hybrid free stack** and requires:
+### 1. ❌ Topic Modeling API Key Not Set in Vercel (MOST LIKELY)
+Topic modeling uses **taxonomy-based classification** and requires:
 
-- **HUGGINGFACE_API_KEY** – for embeddings (free at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens))
-- **GROQ_API_KEY** – for header generation (free at [console.groq.com/keys](https://console.groq.com/keys))
+- **GROQ_API_KEY** – for AI classification into comedy topics (free at [console.groq.com/keys](https://console.groq.com/keys))
 
 **How to Fix:**
 1. Go to https://vercel.com/dashboard
 2. Select your project (usually `joke-writing-app` or similar)
 3. Go to **Settings** → **Environment Variables**
-4. Add both keys if missing:
-   - **Name**: `HUGGINGFACE_API_KEY`  
-     **Value**: your HF token (starts with `hf_`)
+4. Add the key if missing:
    - **Name**: `GROQ_API_KEY`  
      **Value**: your Groq key (starts with `gsk_`)
 5. **Environments**: ✅ Production, ✅ Preview, ✅ Development (check ALL)
@@ -35,9 +32,7 @@ Topic modeling uses a **hybrid free stack** and requires:
 6. Look for `/api/index` function
 7. Click on it to see logs
 8. Look for these log messages:
-   - `✅ Hugging Face API key found` - Embeddings OK
-   - `✅ Groq API key found` - Header generation OK
-   - `⚠️ HUGGINGFACE_API_KEY not set` - Add it for clustering
+   - `✅ Groq API key found` - Taxonomy classification OK
    - `⚠️ GROQ_API_KEY not set` - Will use keyword fallback
    - `🎯 Starting topic modeling` - Topic modeling is running
    - `✅ Topic modeling completed` - Success!
@@ -45,14 +40,7 @@ Topic modeling uses a **hybrid free stack** and requires:
 
 ### 3. 📦 Verify Dependencies
 
-Make sure `ml-kmeans` is in `package.json` (it should be):
-```json
-{
-  "dependencies": {
-    "ml-kmeans": "^7.0.0"
-  }
-}
-```
+Topic modeling uses Groq (taxonomy-based classification). No embeddings or clustering libraries required.
 
 ### 4. 🔄 Force Redeploy
 
@@ -79,9 +67,8 @@ git push
 ### 5. ✅ Verify Code is Deployed
 
 Check that `api/index.js` has:
-- `import { kmeans } from 'ml-kmeans';` at the top
-- `performTopicModeling` function
-- `classifyJokesWithAI` calls `performTopicModeling`
+- `import { COMEDY_TAXONOMY, buildSubtopicToTopicMap } from '../comedyTaxonomy.js'`
+- `classifyJokesWithTaxonomy` function
 
 You can check this in the Vercel dashboard:
 1. Go to your project
@@ -94,18 +81,9 @@ You can check this in the Vercel dashboard:
 
 When working correctly, you should see these logs in Vercel:
 ```
-✅ Hugging Face API key found - topic modeling embeddings
-✅ Groq API key found - header generation (free tier)
-🎯 Starting topic modeling for X segments...
-🔍 HUGGINGFACE_API_KEY available: true
-📤 Sending X texts to Hugging Face embeddings API...
-✅ Received X embeddings from Hugging Face (dim: 384)
-📊 K=2: Silhouette score = X.XXXX
-...
-✅ Best clustering: K=X (score: X.XXXX)
-✅ Topic modeling completed. Clusters assigned.
-🤖 Using Groq (Llama) to classify X segments into topics...
-✅ AI classified X segments into Y topics
+✅ Groq API key found - taxonomy-based topic classification
+🤖 Classifying segments 0-11 with Groq (taxonomy)...
+✅ Taxonomy classified X segments: { Relationships_and_Dating: 3, Work_and_Career: 2, ... }
 ```
 
 ## Quick Test
@@ -115,7 +93,7 @@ When working correctly, you should see these logs in Vercel:
 3. Check Vercel function logs
 4. Look for the log messages above
 
-If you see `⚠️ HUGGINGFACE_API_KEY not set` or `⚠️ GROQ_API_KEY not set`, add those free keys to Vercel env vars!
+If you see `⚠️ GROQ_API_KEY not set`, add it to Vercel env vars (free at console.groq.com)!
 
 ## Still Not Working?
 
@@ -123,4 +101,4 @@ If you've done all the above and it's still not working:
 
 1. **Check the exact error** in Vercel function logs
 2. **Share the error message** - it will tell us exactly what's wrong
-3. **Verify API keys**: HF token starts with `hf_`, Groq key starts with `gsk_`
+3. **Verify Groq key**: starts with `gsk_`

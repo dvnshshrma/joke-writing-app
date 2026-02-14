@@ -1,14 +1,12 @@
 import fetch from 'node-fetch';
 import fs from 'fs';
 import dotenv from 'dotenv';
-import { kmeans } from 'ml-kmeans';
+import { COMEDY_TAXONOMY, buildSubtopicToTopicMap } from '../comedyTaxonomy.js';
 
-// Load environment variables
 dotenv.config();
 
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
 /**
@@ -139,199 +137,27 @@ function classifyJokeTopic(text) {
   return 'Observational';
 }
 
-/**
- * Calculate Euclidean distance between two vectors
- */
-function euclideanDistance(a, b) {
-  if (a.length !== b.length) {
-    throw new Error('Vectors must have the same length');
-  }
-  let sum = 0;
-  for (let i = 0; i < a.length; i++) {
-    sum += Math.pow(a[i] - b[i], 2);
-  }
-  return Math.sqrt(sum);
+function formatHeader(subtopic) {
+  if (!subtopic) return '';
+  return subtopic.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/**
- * Get embeddings for joke texts using Hugging Face (free inference API)
- * Uses sentence-transformers/all-MiniLM-L6-v2 for 384-dim vectors
- */
-async function getEmbeddings(texts) {
-  if (!HUGGINGFACE_API_KEY || HUGGINGFACE_API_KEY === 'your_huggingface_api_key_here') {
-    console.error('❌ Hugging Face API key not configured for embeddings');
-    throw new Error('HUGGINGFACE_API_KEY required for embeddings. Get a free token at huggingface.co/settings/tokens');
+function classifySegmentByKeywords(text, subtopicToTopic) {
+  const lower = (text || '').toLowerCase();
+  let bestTopic = 'Other';
+  let bestSubtopic = 'general';
+  let bestLen = 0;
+  for (const [sub, topic] of Object.entries(subtopicToTopic)) {
+    if (topic === 'Other') continue;
+    if (lower.includes(sub) && sub.length > bestLen) {
+      bestLen = sub.length;
+      bestTopic = topic;
+      bestSubtopic = sub;
+    }
   }
-
-  const HF_EMBEDDING_URL = 'https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2';
-  const BATCH_SIZE = 32;
-  const maxRetries = 2;
-
-  const fetchBatch = async (batch, retries = maxRetries) => {
-    const response = await fetch(HF_EMBEDDING_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${HUGGINGFACE_API_KEY}`
-      },
-      body: JSON.stringify({ inputs: batch })
-    });
-
-    if (response.status === 503 && retries > 0) {
-      console.log('⏳ Model loading (503), retrying in 5s...');
-      await sleep(5000);
-      return fetchBatch(batch, retries - 1);
-    }
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.error(`❌ Hugging Face embeddings API error: ${response.status}`, errorData);
-      throw new Error(`Hugging Face embeddings: ${response.status} - ${errorData.error || response.statusText}`);
-    }
-
-    const data = await response.json();
-    if (Array.isArray(data) && Array.isArray(data[0])) {
-      return data;
-    }
-    if (Array.isArray(data) && typeof data[0] === 'number') {
-      return [data];
-    }
-    throw new Error('Unexpected Hugging Face response format');
-  };
-
-  try {
-    console.log(`📤 Sending ${texts.length} texts to Hugging Face embeddings API...`);
-    const allEmbeddings = [];
-    for (let i = 0; i < texts.length; i += BATCH_SIZE) {
-      const batch = texts.slice(i, i + BATCH_SIZE);
-      const batchEmbeddings = await fetchBatch(batch);
-      allEmbeddings.push(...batchEmbeddings);
-    }
-    console.log(`✅ Received ${allEmbeddings.length} embeddings from Hugging Face (dim: ${allEmbeddings[0]?.length || 0})`);
-    return allEmbeddings;
-  } catch (error) {
-    console.error('❌ Failed to get embeddings:', error.message);
-    throw error;
-  }
+  return { topic: bestTopic, subtopic: bestSubtopic };
 }
 
-/**
- * Calculate silhouette score for cluster validation
- */
-function calculateSilhouetteScore(embeddings, labels, centers) {
-  const n = embeddings.length;
-  if (n <= 1 || new Set(labels).size <= 1) return -1;
-
-  let totalScore = 0;
-  
-  for (let i = 0; i < n; i++) {
-    const point = embeddings[i];
-    const label = labels[i];
-    
-    // Calculate average distance to points in same cluster
-    const sameClusterPoints = embeddings.filter((_, idx) => labels[idx] === label && idx !== i);
-    const a = sameClusterPoints.length > 0
-      ? sameClusterPoints.reduce((sum, p) => sum + euclideanDistance(point, p), 0) / sameClusterPoints.length
-      : 0;
-    
-    // Calculate minimum average distance to other clusters
-    const otherClusters = [...new Set(labels)].filter(l => l !== label);
-    if (otherClusters.length === 0) {
-      totalScore += 0;
-      continue;
-    }
-    
-    const otherClusterDistances = otherClusters.map(clusterLabel => {
-      const clusterPoints = embeddings.filter((_, idx) => labels[idx] === clusterLabel);
-      return clusterPoints.reduce((sum, p) => sum + euclideanDistance(point, p), 0) / clusterPoints.length;
-    });
-    
-    const b = Math.min(...otherClusterDistances);
-    
-    totalScore += (b - a) / Math.max(a, b);
-  }
-  
-  return totalScore / n;
-}
-
-/**
- * Perform topic modeling using embeddings and clustering with gridsearch
- */
-async function performTopicModeling(jokes, minClusters = 2, maxClusters = 8) {
-  if (!jokes || jokes.length === 0) {
-    console.log('⚠️ No jokes provided for topic modeling');
-    return jokes.map(j => ({ ...j, topic: 'General', cluster: 0 }));
-  }
-
-  if (jokes.length === 1) {
-    console.log('⚠️ Only 1 joke, skipping clustering');
-    return jokes.map(j => ({ ...j, topic: 'General', cluster: 0 }));
-  }
-
-  if (!HUGGINGFACE_API_KEY || HUGGINGFACE_API_KEY === 'your_huggingface_api_key_here') {
-    console.log('⚠️ HUGGINGFACE_API_KEY not set, assigning single cluster');
-    return jokes.map(j => ({ ...j, topic: 'General', cluster: 0 }));
-  }
-
-  try {
-    // Get embeddings for all joke texts (Hugging Face)
-    const texts = jokes.map(j => (j.text || j.summary || '').substring(0, 8000));
-    console.log(`🔍 Getting embeddings for ${texts.length} jokes...`);
-    console.log(`📝 Sample text: "${texts[0]?.substring(0, 100)}..."`);
-    
-    const embeddings = await getEmbeddings(texts);
-    console.log(`✅ Got ${embeddings.length} embeddings (dimension: ${embeddings[0]?.length || 0})`);
-
-    // Gridsearch for optimal number of clusters
-    let bestScore = -Infinity;
-    let bestResult = null;
-    let bestK = minClusters;
-
-    const kRange = Math.min(maxClusters, Math.max(minClusters, Math.floor(jokes.length / 2)));
-    
-    for (let k = minClusters; k <= Math.min(kRange, jokes.length); k++) {
-      if (k > embeddings.length) break;
-      
-      try {
-        const result = kmeans(embeddings, k, { initialization: 'kmeans++', maxIterations: 300 });
-        
-        // Calculate silhouette score
-        const score = calculateSilhouetteScore(embeddings, result.clusters, result.centroids);
-        
-        console.log(`📊 K=${k}: Silhouette score = ${score.toFixed(4)}`);
-        
-        if (score > bestScore) {
-          bestScore = score;
-          bestResult = result;
-          bestK = k;
-        }
-      } catch (err) {
-        console.log(`⚠️ K=${k} failed: ${err.message}`);
-      }
-    }
-
-    if (!bestResult) {
-      console.log('⚠️ Clustering failed, using single cluster');
-      return jokes.map(j => ({ ...j, topic: 'General', cluster: 0 }));
-    }
-
-    console.log(`✅ Best clustering: K=${bestK} (score: ${bestScore.toFixed(4)})`);
-
-    // Assign clusters to jokes
-    const clusteredJokes = jokes.map((joke, idx) => ({
-      ...joke,
-      cluster: bestResult.clusters[idx]
-    }));
-
-    return clusteredJokes;
-  } catch (error) {
-    console.error('⚠️ Topic modeling failed:', error.message);
-    // Fallback: assign all to same cluster
-    return jokes.map(j => ({ ...j, topic: 'General', cluster: 0 }));
-  }
-}
 
 /**
  * Validate and truncate header to max 5 words
@@ -351,189 +177,134 @@ function validateHeader(header, maxWords = 5) {
 }
 
 /**
- * Classify jokes using OpenAI AI analysis with topic modeling
- * Groups jokes by topic and generates headers for each topic
- * Falls back to keyword-based classification if OpenAI is unavailable
+ * Classify jokes using comedy taxonomy (Groq or keyword fallback)
  */
-async function classifyJokesWithAI(jokes) {
-  // If no jokes, return empty array
-  if (!jokes || jokes.length === 0) {
-    return jokes;
-  }
+async function classifyJokesWithTaxonomy(jokes) {
+  if (!jokes || jokes.length === 0) return jokes;
 
-  // First, perform topic modeling to get clusters
-  let clusteredJokes;
-  try {
-    console.log(`🎯 Starting topic modeling for ${jokes.length} jokes...`);
-    clusteredJokes = await performTopicModeling(jokes);
-    console.log(`✅ Topic modeling completed. Clusters assigned.`);
-  } catch (error) {
-    console.error('⚠️ Topic modeling failed, continuing without clustering:', error.message);
-    console.error('⚠️ Error stack:', error.stack);
-    clusteredJokes = jokes.map((j, idx) => ({ ...j, cluster: 0 }));
-  }
+  const subtopicToTopic = buildSubtopicToTopicMap();
+  const topicKeys = Object.keys(COMEDY_TAXONOMY).filter(k => k !== 'Other');
+  const taxonomyStr = JSON.stringify(COMEDY_TAXONOMY, null, 2);
 
-  // If Groq API key is not available, use keyword-based fallback
   if (!GROQ_API_KEY || GROQ_API_KEY === 'your_groq_api_key_here') {
-    console.log('ℹ️ Groq API key not found, using keyword-based topic classification');
-    return clusteredJokes.map(joke => {
-      const topic = classifyJokeTopic(joke.text || joke.summary || '');
-      const header = joke.header || generateSmartHeader(joke.text || joke.summary || '', joke.index || 0, topic);
+    console.log('ℹ️ Groq API key not found, using keyword-based taxonomy classification');
+    return jokes.map(joke => {
+      const { topic, subtopic } = classifySegmentByKeywords(joke.text || joke.summary || '', subtopicToTopic);
       return {
         ...joke,
-        topic: topic,
-        header: validateHeader(header)
+        topic,
+        subtopic,
+        header: formatHeader(subtopic),
+        isAIGenerated: false
       };
     });
   }
 
-  try {
-    console.log(`🤖 Using Groq (Llama) to classify ${jokes.length} jokes into topics...`);
-    
-    // Prepare joke texts with indices and clusters
-    const jokesList = jokes.map((joke, idx) => {
-      const text = (joke.text || joke.summary || '').substring(0, 600);
-      const cluster = clusteredJokes[idx]?.cluster ?? 0;
-      return `Joke ${joke.index !== undefined ? joke.index : idx} [Cluster ${cluster}]: "${text}"`;
+  const BATCH_SIZE = 12;
+  const results = [];
+
+  for (let i = 0; i < jokes.length; i += BATCH_SIZE) {
+    const batch = jokes.slice(i, i + BATCH_SIZE);
+    const batchIndices = batch.map((_, idx) => i + idx);
+
+    const jokesList = batch.map((joke, idx) => {
+      const text = (joke.text || joke.summary || '').substring(0, 500);
+      return `Joke ${batchIndices[idx]}: "${text}"`;
     }).join('\n\n');
 
-    const prompt = `You are an expert comedy analyst analyzing a stand-up comedy performance transcript. ${jokes.length} joke segments have been extracted and pre-clustered using topic modeling.
+    const prompt = `You are a comedy analyst. Classify each joke segment into ONE topic and ONE subtopic from this taxonomy.
 
-YOUR TASK:
-1. Analyze each joke segment for its core topic/theme
-2. Verify and refine the pre-clustering by grouping semantically similar jokes
-3. Generate concise, witty headers for each topic group (MAXIMUM 5 WORDS each)
-4. Ensure headers are comedy-style titles that capture the essence of the topic
+TAXONOMY (use EXACT topic and subtopic strings):
+${taxonomyStr}
 
-CRITICAL REQUIREMENTS:
-- Headers MUST be 5 words or fewer (strictly enforced)
-- Headers should be descriptive yet punchy (comedy-style)
-- Group jokes by semantic meaning, not just keywords
-- Each joke must appear in exactly one topic group
-- Include ALL joke indices (0 to ${jokes.length - 1})
+RULES:
+- Pick the SINGLE best-matching topic and subtopic. If a joke fits multiple, choose the PRIMARY theme.
+- Use ONLY topic/subtopic strings from the taxonomy (e.g. "Relationships_and_Dating", "dating rituals").
+- If nothing fits, use topic "Other" and subtopic "general".
+- Return valid JSON array, one object per segment in order.
 
-Return ONLY valid JSON in this exact format (no markdown, no code blocks, just raw JSON):
-{
-  "topics": {
-    "topic_1": {
-      "header": "Dating Struggles",
-      "jokeIndices": [0, 3, 5]
-    },
-    "topic_2": {
-      "header": "Work Life Balance",
-      "jokeIndices": [1, 4, 7]
-    }
-  }
-}
+Return ONLY a JSON array (no markdown):
+[
+  {"segmentIndex": 0, "topic": "Relationships_and_Dating", "subtopic": "dating rituals"},
+  {"segmentIndex": 1, "topic": "Work_and_Career", "subtopic": "office politics"}
+]
 
-Jokes to analyze (pre-clustered):
+Jokes to classify:
 ${jokesList}
 
-Remember: Headers must be ≤5 words. Return JSON now:`;
+JSON array:`;
 
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GROQ_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: 'llama-3.1-8b-instant',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are an expert comedy analyst. Analyze joke segments, group them by topic, and generate concise headers (≤5 words). Always return valid JSON without markdown formatting. Headers must be exactly 5 words or fewer.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.5,
-        max_tokens: 3000
-      })
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(`Groq API error: ${response.status} - ${errorData.error?.message || response.statusText}`);
-    }
-
-    const data = await response.json();
-    const content = data.choices[0]?.message?.content?.trim() || '';
-    
-    // Parse JSON (handle both json_object format and text responses)
-    let classification;
     try {
-      classification = JSON.parse(content);
-    } catch (parseError) {
-      // Fallback: extract JSON from markdown if present
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        classification = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error('Failed to parse Groq response');
+      console.log(`🤖 Classifying jokes ${batchIndices[0]}-${batchIndices[batchIndices.length - 1]} with Groq (taxonomy)...`);
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${GROQ_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: 'llama-3.1-8b-instant',
+          messages: [
+            {
+              role: 'system',
+              content: 'You classify comedy joke segments into topics. Return ONLY a valid JSON array, no other text. Use exact taxonomy strings.'
+            },
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0.3,
+          max_tokens: 1500
+        })
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(`Groq API: ${response.status} - ${err.error?.message || response.statusText}`);
       }
-    }
-    
-    // Create a map of joke index to topic
-    const jokeIndexToTopic = {};
-    const topicHeaders = {};
-    
-    if (classification.topics) {
-      Object.entries(classification.topics).forEach(([topicKey, topicData]) => {
-        const header = validateHeader(topicData.header || topicKey);
-        topicHeaders[topicKey] = header;
-        if (topicData.jokeIndices && Array.isArray(topicData.jokeIndices)) {
-          topicData.jokeIndices.forEach(jokeIdx => {
-            jokeIndexToTopic[jokeIdx] = {
-              topic: header,
-              header: header
-            };
-          });
+
+      const data = await response.json();
+      const content = (data.choices[0]?.message?.content || '').trim();
+      const jsonMatch = content.match(/\[[\s\S]*\]/);
+      const arr = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
+
+      for (let j = 0; j < batch.length; j++) {
+        const joke = batch[j];
+        const raw = arr[j] || {};
+        let topic = String(raw.topic || 'Other').trim();
+        let subtopic = String(raw.subtopic || 'general').trim();
+        if (!topicKeys.includes(topic) && topic !== 'Other') {
+          topic = 'Other';
+          subtopic = 'general';
         }
+        const subtopicsForTopic = COMEDY_TAXONOMY[topic];
+        if (subtopicsForTopic && !subtopicsForTopic.includes(subtopic)) {
+          subtopic = subtopicsForTopic[0] || 'general';
+        }
+        results.push({
+          ...joke,
+          topic,
+          subtopic,
+          header: formatHeader(subtopic),
+          isAIGenerated: true
+        });
+      }
+    } catch (err) {
+      console.error(`⚠️ Groq batch failed, using keyword fallback:`, err.message);
+      batch.forEach(joke => {
+        const { topic, subtopic } = classifySegmentByKeywords(joke.text || joke.summary || '', subtopicToTopic);
+        results.push({
+          ...joke,
+          topic,
+          subtopic,
+          header: formatHeader(subtopic),
+          isAIGenerated: false
+        });
       });
     }
-
-    // Assign topics to jokes
-    const classifiedJokes = jokes.map((joke, idx) => {
-      const jokeIdx = joke.index !== undefined ? joke.index : idx;
-      const topicInfo = jokeIndexToTopic[jokeIdx];
-      
-      if (topicInfo) {
-        return {
-          ...joke,
-          topic: topicInfo.topic,
-          header: validateHeader(joke.header || topicInfo.header)
-        };
-      } else {
-        // Fallback if joke index not found in classification
-        const fallbackTopic = classifyJokeTopic(joke.text || joke.summary || '');
-        const fallbackHeader = generateSmartHeader(joke.text || joke.summary || '', jokeIdx, fallbackTopic);
-        return {
-          ...joke,
-          topic: fallbackTopic,
-          header: validateHeader(fallbackHeader)
-        };
-      }
-    });
-
-    console.log(`✅ AI classified ${classifiedJokes.length} jokes into ${Object.keys(topicHeaders).length} topics`);
-    return classifiedJokes;
-
-  } catch (error) {
-    console.error('⚠️ Groq classification failed, using keyword-based fallback:', error.message);
-    // Fallback to keyword-based classification
-    return clusteredJokes.map(joke => {
-      const fallbackTopic = classifyJokeTopic(joke.text || joke.summary || '');
-      const fallbackHeader = generateSmartHeader(joke.text || joke.summary || '', joke.index || 0, fallbackTopic);
-      return {
-        ...joke,
-        topic: fallbackTopic,
-        header: validateHeader(fallbackHeader)
-      };
-    });
   }
+
+  const topicCounts = results.reduce((acc, j) => { acc[j.topic] = (acc[j.topic] || 0) + 1; return acc; }, {});
+  console.log(`✅ Taxonomy classified ${results.length} jokes:`, topicCounts);
+  return results;
 }
 
 /**
@@ -631,7 +402,7 @@ export async function extractJokesFromTranscript(transcript, excludeStart = 0, e
       };
     });
     // Classify jokes using AI with topic modeling
-    return await classifyJokesWithAI(extractedJokes);
+    return await classifyJokesWithTaxonomy(extractedJokes);
   }
   
   // Enhanced joke detection using multiple signals
@@ -754,7 +525,7 @@ export async function extractJokesFromTranscript(transcript, excludeStart = 0, e
   }
   
   // Use topic modeling + AI classification
-  const classifiedJokes = await classifyJokesWithAI(jokes);
+  const classifiedJokes = await classifyJokesWithTaxonomy(jokes);
   console.log(`🎭 Extracted ${classifiedJokes.length} jokes with topics`);
   return classifiedJokes;
 }

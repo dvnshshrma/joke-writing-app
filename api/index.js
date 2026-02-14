@@ -1,6 +1,6 @@
 // Vercel serverless function entry point
 import { createClient } from '@supabase/supabase-js';
-import { kmeans } from 'ml-kmeans';
+import { COMEDY_TAXONOMY, buildSubtopicToTopicMap } from '../comedyTaxonomy.js';
 
 // Initialize Supabase
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -27,19 +27,13 @@ const supabasePublic = supabaseUrl && supabaseAnonKey
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
 const ASSEMBLYAI_BASE_URL = 'https://api.assemblyai.com/v2';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_API_KEY;
-const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
 // Log API availability (for debugging)
-if (HUGGINGFACE_API_KEY) {
-  console.log('✅ Hugging Face API key found - topic modeling embeddings');
-} else {
-  console.log('⚠️ HUGGINGFACE_API_KEY not set - embeddings will fail (use free tier at huggingface.co)');
-}
 if (GROQ_API_KEY) {
-  console.log('✅ Groq API key found - header generation (free tier)');
+  console.log('✅ Groq API key found - taxonomy-based topic classification');
 } else {
-  console.log('⚠️ GROQ_API_KEY not set - will use keyword-based header fallback');
+  console.log('⚠️ GROQ_API_KEY not set - will use keyword-based topic fallback');
 }
 if (OPENAI_API_KEY) {
   console.log('✅ OpenAI API key found - will use for style classification (Find Your Style)');
@@ -92,8 +86,6 @@ const categorize = (lpm, avg) => {
   if (lpm < 4 || avg < 4) return 'bad';
   return 'average';
 };
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const fetchAssemblyAI = async (path, opts = {}) => {
   if (!ASSEMBLYAI_API_KEY) {
@@ -361,398 +353,160 @@ const segmentTranscriptIntoJokes = (words = [], transcriptText = '', chapters = 
   return segments;
 };
 
-/**
- * Calculate Euclidean distance between two vectors
- */
-function euclideanDistance(a, b) {
-  if (a.length !== b.length) {
-    throw new Error('Vectors must have the same length');
+/** Format topic/subtopic for display (e.g. "dating rituals" -> "Dating Rituals") */
+function formatHeader(subtopic) {
+  if (!subtopic) return '';
+  return subtopic.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+}
+
+/** Keyword-based fallback: match text to taxonomy subtopics */
+function classifySegmentByKeywords(text, subtopicToTopic) {
+  const lower = (text || '').toLowerCase();
+  let bestTopic = 'Other';
+  let bestSubtopic = 'general';
+  let bestLen = 0;
+  for (const [sub, topic] of Object.entries(subtopicToTopic)) {
+    if (topic === 'Other') continue;
+    if (lower.includes(sub) && sub.length > bestLen) {
+      bestLen = sub.length;
+      bestTopic = topic;
+      bestSubtopic = sub;
+    }
   }
-  let sum = 0;
-  for (let i = 0; i < a.length; i++) {
-    sum += Math.pow(a[i] - b[i], 2);
-  }
-  return Math.sqrt(sum);
+  return { topic: bestTopic, subtopic: bestSubtopic };
 }
 
 /**
- * Get embeddings for segment texts using Hugging Face (free inference API)
- * Uses sentence-transformers/all-MiniLM-L6-v2 for 384-dim vectors
+ * Classify joke segments using a fixed comedy taxonomy (Groq or keyword fallback)
+ * Replaces clustering with explicit topic/subtopic classification
  */
-async function getEmbeddings(texts) {
-  if (!HUGGINGFACE_API_KEY || HUGGINGFACE_API_KEY === 'your_huggingface_api_key_here') {
-    console.error('❌ Hugging Face API key not configured for embeddings');
-    throw new Error('HUGGINGFACE_API_KEY required for embeddings. Get a free token at huggingface.co/settings/tokens');
-  }
+const classifyJokesWithTaxonomy = async (segments) => {
+  if (!segments || segments.length === 0) return segments;
 
-  const HF_EMBEDDING_URL = 'https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2';
-  const BATCH_SIZE = 32; // HF free tier may limit batch size
-  const maxRetries = 2;
+  const subtopicToTopic = buildSubtopicToTopicMap();
+  const topicKeys = Object.keys(COMEDY_TAXONOMY).filter(k => k !== 'Other');
+  const taxonomyStr = JSON.stringify(COMEDY_TAXONOMY, null, 2);
 
-  const fetchBatch = async (batch, retries = maxRetries) => {
-    const response = await fetch(HF_EMBEDDING_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${HUGGINGFACE_API_KEY}`
-      },
-      body: JSON.stringify({ inputs: batch })
-    });
-
-    if (response.status === 503 && retries > 0) {
-      console.log('⏳ Model loading (503), retrying in 5s...');
-      await sleep(5000);
-      return fetchBatch(batch, retries - 1);
-    }
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.error(`❌ Hugging Face embeddings API error: ${response.status}`, errorData);
-      throw new Error(`Hugging Face embeddings: ${response.status} - ${errorData.error || response.statusText}`);
-    }
-
-    const data = await response.json();
-    // HF returns [[...], [...]] for multiple inputs, or [...] for single input
-    if (Array.isArray(data) && Array.isArray(data[0])) {
-      return data;
-    }
-    if (Array.isArray(data) && typeof data[0] === 'number') {
-      return [data];
-    }
-    throw new Error('Unexpected Hugging Face response format');
-  };
-
-  try {
-    console.log(`📤 Sending ${texts.length} texts to Hugging Face embeddings API...`);
-    const allEmbeddings = [];
-    for (let i = 0; i < texts.length; i += BATCH_SIZE) {
-      const batch = texts.slice(i, i + BATCH_SIZE);
-      const batchEmbeddings = await fetchBatch(batch);
-      allEmbeddings.push(...batchEmbeddings);
-    }
-    console.log(`✅ Received ${allEmbeddings.length} embeddings from Hugging Face (dim: ${allEmbeddings[0]?.length || 0})`);
-    return allEmbeddings;
-  } catch (error) {
-    console.error('❌ Failed to get embeddings:', error.message);
-    throw error;
-  }
-}
-
-/**
- * Calculate silhouette score for cluster validation
- */
-function calculateSilhouetteScore(embeddings, labels, centers) {
-  const n = embeddings.length;
-  if (n <= 1 || new Set(labels).size <= 1) return -1;
-
-  let totalScore = 0;
-  
-  for (let i = 0; i < n; i++) {
-    const point = embeddings[i];
-    const label = labels[i];
-    
-    // Calculate average distance to points in same cluster
-    const sameClusterPoints = embeddings.filter((_, idx) => labels[idx] === label && idx !== i);
-    const a = sameClusterPoints.length > 0
-      ? sameClusterPoints.reduce((sum, p) => sum + euclideanDistance(point, p), 0) / sameClusterPoints.length
-      : 0;
-    
-    // Calculate minimum average distance to other clusters
-    const otherClusters = [...new Set(labels)].filter(l => l !== label);
-    if (otherClusters.length === 0) {
-      totalScore += 0;
-      continue;
-    }
-    
-    const otherClusterDistances = otherClusters.map(clusterLabel => {
-      const clusterPoints = embeddings.filter((_, idx) => labels[idx] === clusterLabel);
-      return clusterPoints.reduce((sum, p) => sum + euclideanDistance(point, p), 0) / clusterPoints.length;
-    });
-    
-    const b = Math.min(...otherClusterDistances);
-    
-    totalScore += (b - a) / Math.max(a, b);
-  }
-  
-  return totalScore / n;
-}
-
-/**
- * Perform topic modeling using embeddings and clustering with gridsearch
- */
-async function performTopicModeling(segments, minClusters = 2, maxClusters = 8) {
-  if (!segments || segments.length === 0) {
-    console.log('⚠️ No segments provided for topic modeling');
-    return segments.map(s => ({ ...s, cluster: 0 }));
-  }
-
-  if (segments.length === 1) {
-    console.log('⚠️ Only 1 segment, skipping clustering');
-    return segments.map(s => ({ ...s, cluster: 0 }));
-  }
-
-  if (!HUGGINGFACE_API_KEY || HUGGINGFACE_API_KEY === 'your_huggingface_api_key_here') {
-    console.log('⚠️ HUGGINGFACE_API_KEY not set, assigning single cluster');
-    return segments.map(s => ({ ...s, cluster: 0 }));
-  }
-
-  try {
-    // Get embeddings for all segment texts (Hugging Face)
-    const texts = segments.map(s => (s.text || '').substring(0, 8000));
-    console.log(`🔍 Getting embeddings for ${texts.length} segments...`);
-    
-    const embeddings = await getEmbeddings(texts);
-    console.log(`✅ Got ${embeddings.length} embeddings (dimension: ${embeddings[0]?.length || 0})`);
-
-    // Gridsearch for optimal number of clusters
-    let bestScore = -Infinity;
-    let bestResult = null;
-    let bestK = minClusters;
-
-    const kRange = Math.min(maxClusters, Math.max(minClusters, Math.floor(segments.length / 2)));
-    
-    for (let k = minClusters; k <= Math.min(kRange, segments.length); k++) {
-      if (k > embeddings.length) break;
-      
-      try {
-        const result = kmeans(embeddings, k, { initialization: 'kmeans++', maxIterations: 300 });
-        
-        // Calculate silhouette score
-        const score = calculateSilhouetteScore(embeddings, result.clusters, result.centroids);
-        
-        console.log(`📊 K=${k}: Silhouette score = ${score.toFixed(4)}`);
-        
-        if (score > bestScore) {
-          bestScore = score;
-          bestResult = result;
-          bestK = k;
-        }
-      } catch (err) {
-        console.log(`⚠️ K=${k} failed: ${err.message}`);
-      }
-    }
-
-    if (!bestResult) {
-      console.log('⚠️ Clustering failed, using single cluster');
-      return segments.map(s => ({ ...s, cluster: 0 }));
-    }
-
-    console.log(`✅ Best clustering: K=${bestK} (score: ${bestScore.toFixed(4)})`);
-
-    // Assign clusters to segments
-    const clusteredSegments = segments.map((segment, idx) => ({
-      ...segment,
-      cluster: bestResult.clusters[idx]
-    }));
-
-    return clusteredSegments;
-  } catch (error) {
-    console.error('⚠️ Topic modeling failed:', error.message);
-    // Fallback: assign all to same cluster
-    return segments.map(s => ({ ...s, cluster: 0 }));
-  }
-}
-
-/**
- * Validate and truncate header to max 5 words
- */
-function validateHeader(header, maxWords = 5) {
-  if (!header) return '';
-  
-  const words = header.trim().split(/\s+/);
-  if (words.length <= maxWords) {
-    return header.trim();
-  }
-  
-  // Take first maxWords words
-  const truncated = words.slice(0, maxWords).join(' ');
-  console.log(`⚠️ Header truncated from "${header}" to "${truncated}"`);
-  return truncated;
-}
-
-// Classify jokes using OpenAI AI analysis - groups jokes by topic and generates headers
-// This replaces the old database matching approach with AI-powered clustering
-const classifyJokesWithAI = async (segments) => {
-  // If no segments, return empty array
-  if (!segments || segments.length === 0) {
-    return segments;
-  }
-
-  // First, perform topic modeling to get clusters (uses Hugging Face embeddings)
-  let clusteredSegments;
-  try {
-    console.log(`🎯 Starting topic modeling for ${segments.length} segments...`);
-    console.log(`🔍 HUGGINGFACE_API_KEY available: ${!!HUGGINGFACE_API_KEY}`);
-    console.log(`🔍 First segment sample: "${(segments[0]?.text || '').substring(0, 100)}..."`);
-    clusteredSegments = await performTopicModeling(segments);
-    console.log(`✅ Topic modeling completed. Clusters assigned.`);
-    const clusterCounts = clusteredSegments.reduce((acc, s) => {
-      acc[s.cluster] = (acc[s.cluster] || 0) + 1;
-      return acc;
-    }, {});
-    console.log(`📊 Cluster distribution:`, clusterCounts);
-  } catch (error) {
-    console.error('❌ Topic modeling failed, continuing without clustering:', error.message);
-    console.error('❌ Error stack:', error.stack);
-    clusteredSegments = segments.map((s, idx) => ({ ...s, cluster: 0 }));
-  }
-
-  // If Groq API key is not available, use fallback topic extraction
   if (!GROQ_API_KEY || GROQ_API_KEY === 'your_groq_api_key_here') {
-    console.log('ℹ️ Groq API key not found, using keyword-based topic extraction');
-    return clusteredSegments.map(segment => ({
-      ...segment,
-      matchedHeader: validateHeader(extractSegmentTopic(segment.text || '', new Set()) || `Joke ${segment.index + 1}`),
-      isAIGenerated: false
-    }));
+    console.log('ℹ️ Groq API key not found, using keyword-based taxonomy classification');
+    return segments.map(segment => {
+      const { topic, subtopic } = classifySegmentByKeywords(segment.text || '', subtopicToTopic);
+      return {
+        ...segment,
+        topic,
+        subtopic,
+        matchedHeader: formatHeader(subtopic),
+        isAIGenerated: false
+      };
+    });
   }
 
-  try {
-    console.log(`🤖 Using Groq (Llama) to classify ${segments.length} segments into topics...`);
-    
-    // Prepare segment texts with indices and clusters
-    const segmentsList = segments.map((segment, idx) => {
-      const text = (segment.text || '').substring(0, 600);
-      const cluster = clusteredSegments[idx]?.cluster ?? 0;
-      return `Segment ${segment.index !== undefined ? segment.index : idx} [Cluster ${cluster}]: "${text}"`;
+  const BATCH_SIZE = 12;
+  const results = [];
+
+  for (let i = 0; i < segments.length; i += BATCH_SIZE) {
+    const batch = segments.slice(i, i + BATCH_SIZE);
+    const batchIndices = batch.map((_, idx) => i + idx);
+
+    const segmentsList = batch.map((seg, idx) => {
+      const text = (seg.text || '').substring(0, 500);
+      return `Segment ${batchIndices[idx]}: "${text}"`;
     }).join('\n\n');
 
-    const prompt = `You are an expert comedy analyst analyzing a stand-up comedy performance transcript. ${segments.length} joke segments have been extracted and pre-clustered using topic modeling.
+    const prompt = `You are a comedy analyst. Classify each joke segment into ONE topic and ONE subtopic from this taxonomy.
 
-YOUR TASK:
-1. Analyze each joke segment for its core topic/theme
-2. Verify and refine the pre-clustering by grouping semantically similar jokes
-3. Generate concise, witty headers for each topic group (MAXIMUM 5 WORDS each)
-4. Ensure headers are comedy-style titles that capture the essence of the topic
+TAXONOMY (use EXACT topic and subtopic strings):
+${taxonomyStr}
 
-CRITICAL REQUIREMENTS:
-- Headers MUST be 5 words or fewer (strictly enforced)
-- Headers should be descriptive yet punchy (comedy-style)
-- Group segments by semantic meaning, not just keywords
-- Each segment must appear in exactly one topic group
-- Include ALL segment indices (0 to ${segments.length - 1})
+RULES:
+- Pick the SINGLE best-matching topic and subtopic. If a joke fits multiple, choose the PRIMARY theme.
+- Use ONLY topic/subtopic strings from the taxonomy (e.g. "Relationships_and_Dating", "dating rituals").
+- If nothing fits, use topic "Other" and subtopic "general".
+- Return valid JSON array, one object per segment in order.
 
-Return ONLY valid JSON in this exact format (no markdown, no code blocks, just raw JSON):
-{
-  "topics": {
-    "topic_1": {
-      "header": "Dating Struggles",
-      "segmentIndices": [0, 3, 5]
-    },
-    "topic_2": {
-      "header": "Work Life Balance",
-      "segmentIndices": [1, 4, 7]
-    }
-  }
-}
+Return ONLY a JSON array (no markdown):
+[
+  {"segmentIndex": 0, "topic": "Relationships_and_Dating", "subtopic": "dating rituals"},
+  {"segmentIndex": 1, "topic": "Work_and_Career", "subtopic": "office politics"}
+]
 
-Segments to analyze (pre-clustered):
+Segments to classify:
 ${segmentsList}
 
-Remember: Headers must be ≤5 words. Return JSON now:`;
+JSON array:`;
 
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    try {
+      console.log(`🤖 Classifying segments ${batchIndices[0]}-${batchIndices[batchIndices.length - 1]} with Groq (taxonomy)...`);
+
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${GROQ_API_KEY}`
       },
-      body: JSON.stringify({
-        model: 'llama-3.1-8b-instant',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are an expert comedy analyst. Analyze joke segments, group them by topic, and generate concise headers (≤5 words). Always return valid JSON without markdown formatting. Headers must be exactly 5 words or fewer.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.5,
-        max_tokens: 3000
-      })
-    });
+        body: JSON.stringify({
+          model: 'llama-3.1-8b-instant',
+          messages: [
+            {
+              role: 'system',
+              content: 'You classify comedy joke segments into topics. Return ONLY a valid JSON array, no other text. Use exact taxonomy strings.'
+            },
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0.3,
+          max_tokens: 1500
+        })
+      });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(`Groq API error: ${response.status} - ${errorData.error?.message || response.statusText}`);
-    }
-
-    const data = await response.json();
-    const content = data.choices[0]?.message?.content?.trim() || '';
-    
-    // Parse JSON (handle both json_object format and text responses)
-    let classification;
-    try {
-      classification = JSON.parse(content);
-    } catch (parseError) {
-      // Fallback: extract JSON from markdown if present
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        classification = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error('Failed to parse OpenAI response');
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(`Groq API: ${response.status} - ${err.error?.message || response.statusText}`);
       }
-    }
-    
-    // Create a map of segment index to topic
-    const segmentIndexToTopic = {};
-    const topicHeaders = {};
-    
-    if (classification.topics) {
-      Object.entries(classification.topics).forEach(([topicKey, topicData]) => {
-        const header = validateHeader(topicData.header || topicKey);
-        topicHeaders[topicKey] = header;
-        const indices = topicData.segmentIndices || topicData.jokeIndices || [];
-        if (Array.isArray(indices)) {
-          indices.forEach(segmentIdx => {
-            segmentIndexToTopic[segmentIdx] = {
-              topic: header,
-              header: header
-            };
-          });
+
+      const data = await response.json();
+      const content = (data.choices[0]?.message?.content || '').trim();
+      const jsonMatch = content.match(/\[[\s\S]*\]/);
+      const arr = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
+
+      for (let j = 0; j < batch.length; j++) {
+        const seg = batch[j];
+        const raw = arr[j] || {};
+        let topic = String(raw.topic || 'Other').trim();
+        let subtopic = String(raw.subtopic || 'general').trim();
+        if (!topicKeys.includes(topic) && topic !== 'Other') {
+          topic = 'Other';
+          subtopic = 'general';
         }
+        const subtopicsForTopic = COMEDY_TAXONOMY[topic];
+        if (subtopicsForTopic && !subtopicsForTopic.includes(subtopic)) {
+          subtopic = subtopicsForTopic[0] || 'general';
+        }
+        results.push({
+          ...seg,
+          topic,
+          subtopic,
+          matchedHeader: formatHeader(subtopic),
+          isAIGenerated: true
+        });
+      }
+    } catch (err) {
+      console.error(`⚠️ Groq batch failed, using keyword fallback:`, err.message);
+      batch.forEach(seg => {
+        const { topic, subtopic } = classifySegmentByKeywords(seg.text || '', subtopicToTopic);
+        results.push({
+          ...seg,
+          topic,
+          subtopic,
+          matchedHeader: formatHeader(subtopic),
+          isAIGenerated: false
+        });
       });
     }
-
-    // Assign topics to segments
-    const classifiedSegments = segments.map(segment => {
-      const segmentIdx = segment.index !== undefined ? segment.index : segments.indexOf(segment);
-      const topicInfo = segmentIndexToTopic[segmentIdx];
-      
-      if (topicInfo) {
-        return {
-          ...segment,
-          matchedHeader: validateHeader(topicInfo.header),
-          isAIGenerated: true
-        };
-      } else {
-        // Fallback if segment index not found in classification
-        const fallbackHeader = validateHeader(extractSegmentTopic(segment.text || '', new Set()) || `Joke ${segmentIdx + 1}`);
-        return {
-          ...segment,
-          matchedHeader: fallbackHeader,
-          isAIGenerated: false
-        };
-      }
-    });
-
-    console.log(`✅ AI classified ${classifiedSegments.length} segments into ${Object.keys(topicHeaders).length} topics`);
-    return classifiedSegments;
-
-  } catch (error) {
-    console.error('⚠️ Groq classification failed, using keyword-based fallback:', error.message);
-    // Fallback to keyword-based topic extraction
-    return clusteredSegments.map(segment => {
-      const fallbackHeader = validateHeader(extractSegmentTopic(segment.text || '', new Set()) || `Joke ${segment.index !== undefined ? segment.index + 1 : segments.indexOf(segment) + 1}`);
-      return {
-        ...segment,
-        matchedHeader: fallbackHeader,
-        isAIGenerated: false
-      };
-    });
   }
+
+  const topicCounts = results.reduce((acc, s) => { acc[s.topic] = (acc[s.topic] || 0) + 1; return acc; }, {});
+  console.log(`✅ Taxonomy classified ${results.length} segments:`, topicCounts);
+  return results;
 };
 
 // Generate a joke header using AI (Groq - free tier)
@@ -916,43 +670,40 @@ const extractTopicsFromTranscript = (transcriptText) => {
   }));
 };
 
-const buildJokeMetricsFromTranscript = async ({ user, transcriptText, jobWords = [], jobChapters = null, estimatedMinutes = 7 }) => {
-  // Segment transcript into joke candidates
+const buildJokeMetricsFromTranscript = async ({ transcriptText, jobWords = [], jobChapters = null, estimatedMinutes = 7 }) => {
   const segments = segmentTranscriptIntoJokes(jobWords, transcriptText, jobChapters, 4, estimatedMinutes);
-  
+
   if (segments.length === 0) {
-    // Fallback: create generic segments
     const minJokes = 4;
     const numJokes = Math.max(minJokes, Math.min(12, Math.ceil(estimatedMinutes) + 1));
-    return Array.from({ length: numJokes }, (_, i) => ({
-      jokeIndex: i,
-      header: `Joke ${i + 1}`,
-      laughs: 0
-    }));
+    return {
+      jokeMetrics: Array.from({ length: numJokes }, (_, i) => ({
+        jokeIndex: i,
+        header: `Joke ${i + 1}`,
+        topic: 'Other',
+        laughs: 0
+      })),
+      classifiedSegments: []
+    };
   }
 
-  // Use AI to classify segments into topics and generate headers
-  const classifiedSegments = await classifyJokesWithAI(segments);
+  const classifiedSegments = await classifyJokesWithTaxonomy(segments);
 
-  // Convert to joke metrics format
-  return classifiedSegments.map((segment, i) => {
+  const jokeMetrics = classifiedSegments.map((segment, i) => {
     let header = segment.matchedHeader || segment.headline || `Joke ${i + 1}`;
-    
-    // Capitalize first letter
-    if (header) {
-      header = header.charAt(0).toUpperCase() + header.slice(1);
-    } else {
-      header = `Joke ${i + 1}`;
-    }
-    
+    if (header) header = header.charAt(0).toUpperCase() + header.slice(1);
+    else header = `Joke ${i + 1}`;
     return {
       jokeIndex: i,
       header,
+      topic: segment.topic || 'Other',
       laughs: 0,
       startTime: segment.startTime,
       endTime: segment.endTime
     };
   });
+
+  return { jokeMetrics, classifiedSegments };
 };
 
 // Helper to extract user from JWT
@@ -1400,29 +1151,27 @@ export default async function handler(req, res) {
         // Estimate duration in minutes for joke segmentation
         const estimatedMinutes = calculatedEffectiveDuration ? Math.ceil(calculatedEffectiveDuration / 60) : 7;
         
-        // Use AI-powered topic modeling and clustering (no database matching)
-        let jokeMetrics = await buildJokeMetricsFromTranscript({ 
-          user, 
+        // Taxonomy-based topic classification (single pass)
+        const { jokeMetrics: rawJokeMetrics, classifiedSegments } = await buildJokeMetricsFromTranscript({
           transcriptText,
           jobWords: job.words || [],
           jobChapters: job.chapters || null,
           estimatedMinutes
         });
-        
-        // Create extractedJokes array from the segments (for frontend display)
-        const segments = segmentTranscriptIntoJokes(job.words || [], transcriptText, job.chapters || null, 4, estimatedMinutes);
-        const classifiedSegments = await classifyJokesWithAI(segments);
+        let jokeMetrics = rawJokeMetrics;
+
         const extractedJokes = classifiedSegments.map(segment => ({
           index: segment.index !== undefined ? segment.index : classifiedSegments.indexOf(segment),
           header: segment.matchedHeader || segment.headline || `Joke ${segment.index !== undefined ? segment.index + 1 : classifiedSegments.indexOf(segment) + 1}`,
-          topic: segment.matchedHeader || null, // Use header as topic since AI classified them
+          topic: segment.topic || 'Other',
+          subtopic: segment.subtopic || 'general',
           text: segment.text || '',
           startTime: segment.startTime || null,
           endTime: segment.endTime || null,
           duration: segment.endTime && segment.startTime ? segment.endTime - segment.startTime : null
         }));
-        
-        // Distribute laughs evenly across jokes for display (until we do true laughter-to-joke alignment)
+
+        // Distribute laughs evenly across jokes for display
         if (jokeMetrics.length) {
           const per = Math.floor(totalLaughs / jokeMetrics.length);
           let rem = totalLaughs - per * jokeMetrics.length;
@@ -1432,6 +1181,16 @@ export default async function handler(req, res) {
             return { ...j, laughs: per + add };
           });
         }
+
+        // Aggregate laughs by topic for analysis
+        const topicSummaries = jokeMetrics.reduce((acc, j) => {
+          const t = j.topic || 'Other';
+          if (!acc[t]) acc[t] = { laughs: 0, jokeCount: 0 };
+          acc[t].laughs += j.laughs || 0;
+          acc[t].jokeCount += 1;
+          return acc;
+        }, {});
+
         const avgLaughsPerJoke = jokeMetrics.length ? totalLaughs / jokeMetrics.length : 0;
         const category = categorize(laughsPerMinute, avgLaughsPerJoke);
 
@@ -1442,10 +1201,11 @@ export default async function handler(req, res) {
           audio_file_name: audioFileName,
           laughs_per_minute: Number(laughsPerMinute.toFixed(2)),
           avg_laughs_per_joke: Number(avgLaughsPerJoke.toFixed(2)),
-    category,
+          category,
           timeline,
           joke_metrics: jokeMetrics,
           extracted_jokes: extractedJokes,
+          topic_summaries: topicSummaries,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           user_id: user?.id || null,
@@ -1464,10 +1224,10 @@ export default async function handler(req, res) {
           transcript_text: job.text || ''
         }]);
         if (insertErr1) {
-          // Missing column? Retry without transcript_text
           const msg = insertErr1.message || insertErr1.details || '';
-          if (msg.includes('transcript_text') || msg.includes('schema cache')) {
-            const { error: insertErr2 } = await supabaseAdmin.from('analysis_results').insert([analysisDoc]);
+          if (msg.includes('transcript_text') || msg.includes('topic_summaries') || msg.includes('schema cache')) {
+            const { topic_summaries: _ts, ...fallbackDoc } = analysisDoc;
+            const { error: insertErr2 } = await supabaseAdmin.from('analysis_results').insert([fallbackDoc]);
             if (insertErr2) throw insertErr2;
           } else {
             throw insertErr1;
@@ -1477,13 +1237,14 @@ export default async function handler(req, res) {
         return res.json({
           status: 'completed',
           id: jobId,
-      setName: analysisDoc.set_name,
+          setName: analysisDoc.set_name,
           laughsPerMinute: analysisDoc.laughs_per_minute,
           avgLaughsPerJoke: analysisDoc.avg_laughs_per_joke,
           category,
           timeline,
           jokeMetrics,
           extractedJokes: extractedJokes,
+          topicSummaries,
           transcriptText,
           isMockData: false,
           excludedStart,
@@ -1518,6 +1279,7 @@ export default async function handler(req, res) {
       timeline: data.timeline || [],
       jokeMetrics: data.joke_metrics || [],
       extractedJokes: data.extracted_jokes || [],
+      topicSummaries: data.topic_summaries || {},
       transcriptText: data.transcript_text || null,
           createdAt: data.created_at
         });
