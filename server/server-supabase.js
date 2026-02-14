@@ -30,17 +30,17 @@ const upload = multer({
   }
 });
 
-// Configure multer specifically for video compression (larger files)
-// Increased to 15GB to handle 8.7GB files with buffer
+// Configure multer specifically for video compression (5GB max - memory-optimized for 1GB Railway)
+const MAX_VIDEO_SIZE_BYTES = 5 * 1024 * 1024 * 1024; // 5GB
 const videoUpload = multer({ 
   dest: 'uploads/',
   limits: { 
-    fileSize: 15 * 1024 * 1024 * 1024, // 15GB limit for video compression (increased for 8.7GB files)
-    fieldSize: 15 * 1024 * 1024 * 1024, // 15GB for field size
-    fields: 10, // Number of non-file fields
-    fieldNameSize: 100, // Max field name size
-    files: 1, // Number of files
-    parts: 100 // Max number of parts in multipart form
+    fileSize: MAX_VIDEO_SIZE_BYTES,
+    fieldSize: MAX_VIDEO_SIZE_BYTES,
+    fields: 10,
+    fieldNameSize: 100,
+    files: 1,
+    parts: 100
   },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('video/')) {
@@ -53,11 +53,9 @@ const videoUpload = multer({
 
 // Middleware
 app.use(cors());
-// Increase body size limits for large file uploads (though multer handles multipart separately)
-// These are for JSON/URL-encoded requests, but set high to avoid any conflicts
-// Note: For multipart/form-data (file uploads), multer handles it independently
-app.use(express.json({ limit: '15gb' }));
-app.use(express.urlencoded({ extended: true, limit: '15gb' }));
+// Body size limits for video uploads (5GB max)
+app.use(express.json({ limit: '5gb' }));
+app.use(express.urlencoded({ extended: true, limit: '5gb' }));
 
 // Auth middleware to extract user from JWT
 const extractUser = async (req, res, next) => {
@@ -724,13 +722,13 @@ app.post('/api/compress-video', (req, res, next) => {
       console.error('❌ Error message:', err.message);
       
       if (err.code === 'LIMIT_FILE_SIZE') {
-        const maxSizeGB = (15 * 1024 * 1024 * 1024 / 1024 / 1024 / 1024).toFixed(0);
+        const maxSizeGB = 5;
         const fileSizeGB = contentLength ? (parseInt(contentLength) / 1024 / 1024 / 1024).toFixed(2) : 'unknown';
         return res.status(413).json({ 
           error: 'File too large', 
-          details: `Maximum file size is ${maxSizeGB}GB. Your file (${fileSizeGB}GB) appears to be larger than this limit.`,
+          details: `Maximum file size is ${maxSizeGB}GB. Your file (${fileSizeGB}GB) exceeds this limit.`,
           maxSize: `${maxSizeGB}GB`,
-          currentLimit: '15GB',
+          currentLimit: '5GB',
           yourFileSize: `${fileSizeGB}GB`
         });
       }
@@ -871,7 +869,8 @@ app.post('/api/compress-video', (req, res, next) => {
         .videoBitrate(videoBitrate) // Dynamic bitrate based on target size
         .audioBitrate('128k') // High quality audio
         .outputOptions([
-          '-preset slow', // Better compression efficiency
+          '-threads 2', // Limit encoding threads to reduce memory (1GB Railway)
+          '-preset fast', // Balance of speed & memory (vs slow/veryslow)
           '-crf 23', // Constant Rate Factor for quality (18-28 range, 23 is good balance)
           '-movflags +faststart', // Enable fast start for web playback
           '-pix_fmt yuv420p', // Ensure compatibility
@@ -940,7 +939,8 @@ app.post('/api/compress-video', (req, res, next) => {
           .videoBitrate(finalBitrate)
           .audioBitrate('96k')
           .outputOptions([
-            '-preset slow',
+            '-threads 2', // Limit encoding threads to reduce memory
+            '-preset fast',
             '-crf 26', // Slightly lower quality for more compression
             '-movflags +faststart',
             '-pix_fmt yuv420p',
@@ -1017,7 +1017,7 @@ app.post('/api/compress-video', (req, res, next) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Comedica server running on http://localhost:${PORT}`);
   console.log(`☁️  Using Supabase cloud database`);
 });

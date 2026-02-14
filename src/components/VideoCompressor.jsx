@@ -15,18 +15,24 @@ function VideoCompressor() {
   const [originalSize, setOriginalSize] = useState(null)
   const [compressedSize, setCompressedSize] = useState(null)
 
+  const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024 // 5GB
+
   const handleFileSelect = (e) => {
     const file = e.target.files[0]
     if (file) {
-      if (file.type.startsWith('video/')) {
-        setVideoFile(file)
-        setOriginalSize(file.size)
-        setCompressedVideoUrl(null)
-        setError(null)
-        setProgress(0)
-      } else {
+      if (!file.type.startsWith('video/')) {
         alert('Please select a video file (MP4, MOV, AVI, MKV, WEBM, etc.)')
+        return
       }
+      if (file.size > MAX_FILE_SIZE) {
+        alert(`File too large. Maximum size is 5 GB. Your file is ${formatFileSize(file.size)}.`)
+        return
+      }
+      setVideoFile(file)
+      setOriginalSize(file.size)
+      setCompressedVideoUrl(null)
+      setError(null)
+      setProgress(0)
     }
   }
 
@@ -174,9 +180,11 @@ function VideoCompressor() {
                     <p className="file-name">{videoFile.name}</p>
                     <p className="file-size">
                       {formatFileSize(videoFile.size)}
-                      {originalSize > 2 * 1024 * 1024 * 1024 && (
-                        <span className="file-warning"> (Over 2GB)</span>
-                      )}
+                      {originalSize > 5 * 1024 * 1024 * 1024 ? (
+                        <span className="file-warning"> (Over 5GB limit)</span>
+                      ) : originalSize > 2 * 1024 * 1024 * 1024 ? (
+                        <span className="file-warning"> (Over 2GB target)</span>
+                      ) : null}
                     </p>
                   </div>
                   {!isCompressing && (
@@ -279,9 +287,10 @@ function VideoCompressor() {
         <div className="info-section">
           <h3>ℹ️ About Video Compression</h3>
           <ul>
-            <li>Uses advanced H.264 encoding with optimal settings for quality</li>
+            <li>Maximum input size: 5 GB</li>
+            <li>Uses H.264 encoding with optimized settings for quality</li>
             <li>Maintains video resolution and frame rate</li>
-            <li>Automatically adjusts bitrate to achieve target file size</li>
+            <li>Automatically adjusts bitrate to achieve target file size (under 2 GB)</li>
             <li>Supports all common video formats</li>
             <li>Compressed videos are optimized for sharing and storage</li>
           </ul>
