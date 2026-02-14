@@ -1721,12 +1721,36 @@ const analyzeWritingElements = (transcriptText, words = []) => {
     {
       name: 'Tags (Add-on jokes)',
       detect: () => {
-        // Look for quick follow-up sentences after main points
-        const shortFollowUps = sentences.filter(s => {
-          const words = s.trim().split(/\s+/);
-          return words.length > 3 && words.length < 15;
-        }).length;
-        return Math.min(1, shortFollowUps / Math.max(5, sentences.length / 3));
+        // Heuristic: tag = short line after punchline, length ≤60% of preceding, word overlap with prev
+        if (sentences.length < 2) return 0;
+        const stopWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'is', 'it', 'that', 'this', 'i', 'you', 'we', 'they', 'he', 'she']);
+        const getWords = (s) => s.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/).filter(w => w.length > 1 && !stopWords.has(w));
+        const wordOverlap = (wordsA, wordsB) => {
+          if (wordsB.length === 0) return 0;
+          const setB = new Set(wordsB);
+          const shared = wordsA.filter(w => setB.has(w)).length;
+          return shared / wordsB.length;
+        };
+        const avgLen = sentences.reduce((sum, s) => sum + s.trim().split(/\s+/).length, 0) / sentences.length;
+        let tagCount = 0;
+        let tagStackCount = 0;
+        for (let i = 1; i < sentences.length; i++) {
+          const prev = sentences[i - 1].trim().split(/\s+/).length;
+          const curr = sentences[i].trim().split(/\s+/).length;
+          const prevWords = getWords(sentences[i - 1]);
+          const currWords = getWords(sentences[i]);
+          const overlap = wordOverlap(prevWords, currWords);
+          const isPunchline = prev >= avgLen * 0.8;
+          const isShortEnough = prev > 0 && curr <= prev * 0.6;
+          const hasOverlap = overlap >= 0.35;
+          if (isPunchline && isShortEnough && hasOverlap) tagCount++;
+          if (isPunchline && isShortEnough && i + 1 < sentences.length) {
+            const next = sentences[i + 1].trim().split(/\s+/).length;
+            if (next <= prev * 0.6) tagStackCount++;
+          }
+        }
+        const denom = Math.max(4, sentences.length / 6);
+        return Math.min(1, (tagCount + tagStackCount * 0.5) / denom);
       }
     },
     {
@@ -1784,7 +1808,6 @@ const analyzeWritingElements = (transcriptText, words = []) => {
     {
       name: 'Timing & Pacing',
       detect: () => {
-        // Only meaningful with word timestamps (pauses between words)
         if (words.length > 0) {
           const pauses = [];
           for (let i = 1; i < words.length; i++) {
@@ -1792,11 +1815,16 @@ const analyzeWritingElements = (transcriptText, words = []) => {
             if (gap > 500) pauses.push(gap);
           }
           const avgPause = pauses.length > 0 ? pauses.reduce((a, b) => a + b, 0) / pauses.length : 0;
-          const score = pauses.length / Math.max(12, wordArray.length / 80) * (avgPause > 1000 ? 1.1 : 1.0);
+          const denom = Math.max(15, wordArray.length / 60);
+          const score = pauses.length / denom * (avgPause > 1000 ? 1.05 : 1.0);
           return Math.min(1, score);
         }
-        // No timestamps: can't assess timing from text alone. Return low score to indicate unknown.
-        return 0.15;
+        // Transcript-only: infer timing from pause proxies (short/fragment lines)
+        const lines = sentences.map(s => s.trim().split(/\s+/).length);
+        const pauseLines = lines.filter(len => len <= 6).length;
+        const fragmentLines = lines.filter(len => len <= 2).length;
+        const strategicPauseRatio = (pauseLines + fragmentLines * 0.5) / Math.max(1, lines.length);
+        return Math.min(1, strategicPauseRatio * 1.5);
       }
     },
     {
