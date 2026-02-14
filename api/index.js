@@ -1741,9 +1741,11 @@ const analyzeWritingElements = (transcriptText, words = []) => {
     {
       name: 'Incongruity',
       detect: () => {
-        // Look for unexpected combinations or contradictions
-        const unexpected = (text.match(/\b(but|however|actually|really|wait|no|yes)\b/gi) || []).length;
-        return Math.min(1, unexpected / Math.max(5, wordArray.length / 50));
+        // Look for unexpected combinations or contradictions (stricter: exclude filler)
+        const strongMarkers = (text.match(/\b(but|however|unlike|instead|rather|opposite|contradiction)\b/gi) || []).length;
+        const turnMarkers = (text.match(/\b(wait|actually|turns out|except|although)\b/gi) || []).length;
+        const score = (strongMarkers * 0.8 + turnMarkers * 0.4) / Math.max(12, wordArray.length / 30);
+        return Math.min(1, score);
       }
     },
     {
@@ -1782,40 +1784,45 @@ const analyzeWritingElements = (transcriptText, words = []) => {
     {
       name: 'Timing & Pacing',
       detect: () => {
-        // Analyze word timestamps for pacing (if available)
+        // Only meaningful with word timestamps (pauses between words)
         if (words.length > 0) {
           const pauses = [];
           for (let i = 1; i < words.length; i++) {
             const gap = (words[i].start || 0) - (words[i - 1].end || 0);
-            if (gap > 500) pauses.push(gap); // 500ms+ pause
+            if (gap > 500) pauses.push(gap);
           }
           const avgPause = pauses.length > 0 ? pauses.reduce((a, b) => a + b, 0) / pauses.length : 0;
-          // Good timing has strategic pauses (not too many, not too few)
-          return Math.min(1, pauses.length / Math.max(10, wordArray.length / 100) * (avgPause > 1000 ? 1.2 : 1.0));
+          const score = pauses.length / Math.max(12, wordArray.length / 80) * (avgPause > 1000 ? 1.1 : 1.0);
+          return Math.min(1, score);
         }
-        // Fallback: look for punctuation patterns
-        const pauses = (transcriptText.match(/[.!?]\s+/g) || []).length;
-        return Math.min(1, pauses / Math.max(10, sentences.length / 2));
+        // No timestamps: can't assess timing from text alone. Return low score to indicate unknown.
+        return 0.15;
       }
     },
     {
       name: 'Repetition',
       detect: () => {
-        // Look for repeated words/phrases for emphasis
+        // Intentional repetition: same word 5+ times (emphasis), or repeated phrases close together
+        const commonWords = new Set(['about', 'think', 'people', 'something', 'really', 'because', 'would', 'could', 'which', 'their', 'there', 'other', 'going', 'being', 'where', 'never', 'every', 'always']);
         const wordFreq = {};
         wordArray.forEach(w => {
-          if (w.length > 4) wordFreq[w] = (wordFreq[w] || 0) + 1;
+          const clean = w.toLowerCase().replace(/[^a-z]/g, '');
+          if (clean.length >= 5 && !commonWords.has(clean)) {
+            wordFreq[clean] = (wordFreq[clean] || 0) + 1;
+          }
         });
-        const repeated = Object.values(wordFreq).filter(count => count >= 3).length;
-        return Math.min(1, repeated / Math.max(2, wordArray.length / 200));
+        const intentionalRepetition = Object.values(wordFreq).filter(count => count >= 5).length;
+        const denom = Math.max(6, wordArray.length / 60);
+        return Math.min(1, intentionalRepetition / denom);
       }
     },
     {
       name: 'Contrast',
       detect: () => {
-        // Look for contrasting ideas
+        // Look for contrasting ideas - higher threshold, scale with transcript length
         const contrasts = (text.match(/\b(but|however|unlike|versus|instead|rather|different|opposite)\b/gi) || []).length;
-        return Math.min(1, contrasts / Math.max(3, sentences.length / 5));
+        const denom = Math.max(10, wordArray.length / 50);
+        return Math.min(1, contrasts / denom);
       }
     },
     {
