@@ -1,0 +1,5 @@
+[build]
+nixpacksPlan = { packages = ["ffmpeg"] }
+
+[deploy]
+startCommand = "node server-supabase.js"

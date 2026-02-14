@@ -139,6 +139,7 @@ vercel
 
 ### Frontend (Vercel/Netlify):
 - `VITE_API_URL` = your backend URL (e.g., `https://your-backend.vercel.app/api`)
+- `VITE_COMPRESSION_URL` = your compression backend URL (e.g., `https://your-compression-backend.railway.app`)
 
 ## Testing on Mobile
 

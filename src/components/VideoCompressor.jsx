@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import './VideoCompressor.css'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001'
+const COMPRESSION_BASE_URL = import.meta.env.VITE_COMPRESSION_URL || API_BASE_URL
 
 function VideoCompressor() {
   const navigate = useNavigate()
@@ -43,7 +44,7 @@ function VideoCompressor() {
       const formData = new FormData()
       formData.append('video', videoFile)
 
-      const response = await fetch(`${API_BASE_URL}/api/compress-video`, {
+      const response = await fetch(`${COMPRESSION_BASE_URL}/api/compress-video`, {
         method: 'POST',
         body: formData
       })
