@@ -36,7 +36,9 @@ Vercel provides free hosting for both frontend and backend.
    - Follow prompts
    - When asked for environment variables, add:
      - `SUPABASE_URL` = your Supabase URL
-     - `SUPABASE_KEY` = your Supabase anon key
+     - `SUPABASE_KEY` = your Supabase service role key
+     - `HUGGINGFACE_API_KEY` = free at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
+     - `GROQ_API_KEY` = free at [console.groq.com/keys](https://console.groq.com/keys)
 
 2. **Get Backend URL:**
    - After deployment, Vercel will give you a URL like: `https://your-backend.vercel.app`

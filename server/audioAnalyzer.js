@@ -8,6 +8,8 @@ dotenv.config();
 
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN;
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
 /**
  * Real AI Audio Analyzer using AssemblyAI
@@ -151,43 +153,66 @@ function euclideanDistance(a, b) {
   return Math.sqrt(sum);
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 /**
- * Get embeddings for joke texts using OpenAI
+ * Get embeddings for joke texts using Hugging Face (free inference API)
+ * Uses sentence-transformers/all-MiniLM-L6-v2 for 384-dim vectors
  */
 async function getEmbeddings(texts) {
-  if (!OPENAI_API_KEY || OPENAI_API_KEY === 'your_openai_api_key_here') {
-    console.error('❌ OpenAI API key not configured for embeddings');
-    throw new Error('OpenAI API key required for embeddings. Please set OPENAI_API_KEY environment variable.');
+  if (!HUGGINGFACE_API_KEY || HUGGINGFACE_API_KEY === 'your_huggingface_api_key_here') {
+    console.error('❌ Hugging Face API key not configured for embeddings');
+    throw new Error('HUGGINGFACE_API_KEY required for embeddings. Get a free token at huggingface.co/settings/tokens');
   }
 
-  console.log(`🔑 Using OpenAI API key (length: ${OPENAI_API_KEY.length})`);
+  const HF_EMBEDDING_URL = 'https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2';
+  const BATCH_SIZE = 32;
+  const maxRetries = 2;
 
-  try {
-    console.log(`📤 Sending ${texts.length} texts to OpenAI embeddings API...`);
-    const response = await fetch('https://api.openai.com/v1/embeddings', {
+  const fetchBatch = async (batch, retries = maxRetries) => {
+    const response = await fetch(HF_EMBEDDING_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`
+        'Authorization': `Bearer ${HUGGINGFACE_API_KEY}`
       },
-      body: JSON.stringify({
-        model: 'text-embedding-3-small',
-        input: texts
-      })
+      body: JSON.stringify({ inputs: batch })
     });
+
+    if (response.status === 503 && retries > 0) {
+      console.log('⏳ Model loading (503), retrying in 5s...');
+      await sleep(5000);
+      return fetchBatch(batch, retries - 1);
+    }
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      console.error(`❌ OpenAI embeddings API error: ${response.status}`, errorData);
-      throw new Error(`OpenAI embeddings error: ${response.status} - ${errorData.error?.message || response.statusText}`);
+      console.error(`❌ Hugging Face embeddings API error: ${response.status}`, errorData);
+      throw new Error(`Hugging Face embeddings: ${response.status} - ${errorData.error || response.statusText}`);
     }
 
     const data = await response.json();
-    console.log(`✅ Received ${data.data?.length || 0} embeddings from OpenAI`);
-    return data.data.map(item => item.embedding);
+    if (Array.isArray(data) && Array.isArray(data[0])) {
+      return data;
+    }
+    if (Array.isArray(data) && typeof data[0] === 'number') {
+      return [data];
+    }
+    throw new Error('Unexpected Hugging Face response format');
+  };
+
+  try {
+    console.log(`📤 Sending ${texts.length} texts to Hugging Face embeddings API...`);
+    const allEmbeddings = [];
+    for (let i = 0; i < texts.length; i += BATCH_SIZE) {
+      const batch = texts.slice(i, i + BATCH_SIZE);
+      const batchEmbeddings = await fetchBatch(batch);
+      allEmbeddings.push(...batchEmbeddings);
+    }
+    console.log(`✅ Received ${allEmbeddings.length} embeddings from Hugging Face (dim: ${allEmbeddings[0]?.length || 0})`);
+    return allEmbeddings;
   } catch (error) {
     console.error('❌ Failed to get embeddings:', error.message);
-    console.error('❌ Error details:', error);
     throw error;
   }
 }
@@ -240,14 +265,18 @@ async function performTopicModeling(jokes, minClusters = 2, maxClusters = 8) {
     return jokes.map(j => ({ ...j, topic: 'General', cluster: 0 }));
   }
 
-  // If only 1 joke, can't cluster
   if (jokes.length === 1) {
     console.log('⚠️ Only 1 joke, skipping clustering');
     return jokes.map(j => ({ ...j, topic: 'General', cluster: 0 }));
   }
 
+  if (!HUGGINGFACE_API_KEY || HUGGINGFACE_API_KEY === 'your_huggingface_api_key_here') {
+    console.log('⚠️ HUGGINGFACE_API_KEY not set, assigning single cluster');
+    return jokes.map(j => ({ ...j, topic: 'General', cluster: 0 }));
+  }
+
   try {
-    // Get embeddings for all joke texts
+    // Get embeddings for all joke texts (Hugging Face)
     const texts = jokes.map(j => (j.text || j.summary || '').substring(0, 8000));
     console.log(`🔍 Getting embeddings for ${texts.length} jokes...`);
     console.log(`📝 Sample text: "${texts[0]?.substring(0, 100)}..."`);
@@ -344,9 +373,9 @@ async function classifyJokesWithAI(jokes) {
     clusteredJokes = jokes.map((j, idx) => ({ ...j, cluster: 0 }));
   }
 
-  // If OpenAI API key is not available, use keyword-based fallback
-  if (!OPENAI_API_KEY || OPENAI_API_KEY === 'your_openai_api_key_here') {
-    console.log('ℹ️ OpenAI API key not found, using keyword-based topic classification');
+  // If Groq API key is not available, use keyword-based fallback
+  if (!GROQ_API_KEY || GROQ_API_KEY === 'your_groq_api_key_here') {
+    console.log('ℹ️ Groq API key not found, using keyword-based topic classification');
     return clusteredJokes.map(joke => {
       const topic = classifyJokeTopic(joke.text || joke.summary || '');
       const header = joke.header || generateSmartHeader(joke.text || joke.summary || '', joke.index || 0, topic);
@@ -359,7 +388,7 @@ async function classifyJokesWithAI(jokes) {
   }
 
   try {
-    console.log(`🤖 Using OpenAI to classify ${jokes.length} jokes into topics...`);
+    console.log(`🤖 Using Groq (Llama) to classify ${jokes.length} jokes into topics...`);
     
     // Prepare joke texts with indices and clusters
     const jokesList = jokes.map((joke, idx) => {
@@ -402,14 +431,14 @@ ${jokesList}
 
 Remember: Headers must be ≤5 words. Return JSON now:`;
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`
+        'Authorization': `Bearer ${GROQ_API_KEY}`
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: 'llama-3.1-8b-instant',
         messages: [
           {
             role: 'system',
@@ -421,14 +450,13 @@ Remember: Headers must be ≤5 words. Return JSON now:`;
           }
         ],
         temperature: 0.5,
-        max_tokens: 3000,
-        response_format: { type: 'json_object' }
+        max_tokens: 3000
       })
     });
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(`OpenAI API error: ${response.status} - ${errorData.error?.message || response.statusText}`);
+      throw new Error(`Groq API error: ${response.status} - ${errorData.error?.message || response.statusText}`);
     }
 
     const data = await response.json();
@@ -444,7 +472,7 @@ Remember: Headers must be ≤5 words. Return JSON now:`;
       if (jsonMatch) {
         classification = JSON.parse(jsonMatch[0]);
       } else {
-        throw new Error('Failed to parse OpenAI response');
+        throw new Error('Failed to parse Groq response');
       }
     }
     
@@ -494,7 +522,7 @@ Remember: Headers must be ≤5 words. Return JSON now:`;
     return classifiedJokes;
 
   } catch (error) {
-    console.error('⚠️ OpenAI classification failed, using keyword-based fallback:', error.message);
+    console.error('⚠️ Groq classification failed, using keyword-based fallback:', error.message);
     // Fallback to keyword-based classification
     return clusteredJokes.map(joke => {
       const fallbackTopic = classifyJokeTopic(joke.text || joke.summary || '');

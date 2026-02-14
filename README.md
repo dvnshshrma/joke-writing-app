@@ -71,9 +71,10 @@ A web application for stand-up comedians to organize, edit, and manage versions 
 - **Visual Bar Chart**: Color-coded bars showing above/below average performance
 
 ### ✅ AI Topic Modeling (Implemented)
+- **Hybrid Free Stack**: Hugging Face embeddings + Groq (Llama) for headers – no OpenAI quota needed
 - **Joke Extraction**: Automatically extracts jokes from transcript using silence gaps
-- **Topic Classification**: Matches transcript to your saved joke headers
-- **Smart Headers**: AI-generated headers based on content patterns
+- **Topic Clustering**: k-means on embeddings, with AI-generated headers per cluster
+- **Smart Headers**: AI-generated or keyword-based headers when APIs unavailable
 - **Minimum Joke Detection**: Ensures at least 4 jokes for a 7-minute set
 - **Comedy Categories**: Fallback classification into 15+ comedy topic categories
 
@@ -118,7 +119,11 @@ PORT=3001
 # Optional: For real AI audio analysis (get free key at https://www.assemblyai.com)
 ASSEMBLYAI_API_KEY=your_assemblyai_api_key_here
 
-# Optional: For OpenAI-powered style classification in "Find Your Style"
+# Topic modeling (hybrid free stack – all optional, free tiers):
+HUGGINGFACE_API_KEY=your_hf_token_here   # Embeddings – get free at huggingface.co/settings/tokens
+GROQ_API_KEY=your_groq_api_key_here      # Header generation – get free at console.groq.com/keys
+
+# Optional: For OpenAI-powered "Find Your Style" chat (paid)
 OPENAI_API_KEY=your_openai_api_key_here
 ```
 
@@ -130,7 +135,8 @@ VITE_SUPABASE_ANON_KEY=your_anon_key_here
 
 > **Note**: 
 > - Without an AssemblyAI API key, the app uses simulated analysis data. The free tier includes 100 hours of audio analysis.
-> - Without an OpenAI API key, "Find Your Style" uses keyword-based style detection. Adding the key enables AI-powered zero-shot classification for more accurate results.
+> - **Topic modeling** uses a hybrid free stack: Hugging Face (embeddings) + Groq (Llama for headers). Get free keys at [huggingface.co](https://huggingface.co/settings/tokens) and [console.groq.com](https://console.groq.com/keys). Without them, keyword-based topic extraction is used.
+> - Without an OpenAI API key, "Find Your Style" uses keyword-based style detection. Adding the key enables AI-powered zero-shot classification.
 
 #### 5. Start the Backend Server
 

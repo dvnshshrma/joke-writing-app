@@ -5,22 +5,24 @@ Topic modeling is not working on the deployed app even after redeployment.
 
 ## Most Common Causes
 
-### 1. ❌ OPENAI_API_KEY Not Set in Vercel (MOST LIKELY)
-The topic modeling requires `OPENAI_API_KEY` to be set in Vercel environment variables.
+### 1. ❌ Topic Modeling API Keys Not Set in Vercel (MOST LIKELY)
+Topic modeling uses a **hybrid free stack** and requires:
+
+- **HUGGINGFACE_API_KEY** – for embeddings (free at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens))
+- **GROQ_API_KEY** – for header generation (free at [console.groq.com/keys](https://console.groq.com/keys))
 
 **How to Fix:**
 1. Go to https://vercel.com/dashboard
 2. Select your project (usually `joke-writing-app` or similar)
 3. Go to **Settings** → **Environment Variables**
-4. Look for `OPENAI_API_KEY` - if it doesn't exist, add it:
-   - **Name**: `OPENAI_API_KEY`
-   - **Value**: your OpenAI key (starts with `sk-`)
-   - **Environments**: ✅ Production, ✅ Preview, ✅ Development (check ALL)
-5. Click **Save**
-6. **Important**: After adding, you MUST redeploy:
-   - Go to **Deployments** tab
-   - Click the **⋯** (three dots) on the latest deployment
-   - Click **Redeploy** OR just push a new commit
+4. Add both keys if missing:
+   - **Name**: `HUGGINGFACE_API_KEY`  
+     **Value**: your HF token (starts with `hf_`)
+   - **Name**: `GROQ_API_KEY`  
+     **Value**: your Groq key (starts with `gsk_`)
+5. **Environments**: ✅ Production, ✅ Preview, ✅ Development (check ALL)
+6. Click **Save**
+7. **Important**: After adding, you MUST redeploy
 
 ### 2. 🔍 Check Vercel Function Logs
 
@@ -33,8 +35,10 @@ The topic modeling requires `OPENAI_API_KEY` to be set in Vercel environment var
 6. Look for `/api/index` function
 7. Click on it to see logs
 8. Look for these log messages:
-   - `✅ OpenAI API key found` - Good!
-   - `❌ OpenAI API key NOT FOUND` - Bad! Need to add env var
+   - `✅ Hugging Face API key found` - Embeddings OK
+   - `✅ Groq API key found` - Header generation OK
+   - `⚠️ HUGGINGFACE_API_KEY not set` - Add it for clustering
+   - `⚠️ GROQ_API_KEY not set` - Will use keyword fallback
    - `🎯 Starting topic modeling` - Topic modeling is running
    - `✅ Topic modeling completed` - Success!
    - `❌ Topic modeling failed` - Check error message
@@ -90,18 +94,17 @@ You can check this in the Vercel dashboard:
 
 When working correctly, you should see these logs in Vercel:
 ```
-✅ OpenAI API key found - will use GPT for style classification
-✅ OpenAI API key length: 164
+✅ Hugging Face API key found - topic modeling embeddings
+✅ Groq API key found - header generation (free tier)
 🎯 Starting topic modeling for X segments...
-🔍 OPENAI_API_KEY available: true (length: 164)
-🔍 Getting embeddings for X segments...
-📤 Sending X texts to OpenAI embeddings API...
-✅ Received X embeddings from OpenAI
+🔍 HUGGINGFACE_API_KEY available: true
+📤 Sending X texts to Hugging Face embeddings API...
+✅ Received X embeddings from Hugging Face (dim: 384)
 📊 K=2: Silhouette score = X.XXXX
 ...
 ✅ Best clustering: K=X (score: X.XXXX)
 ✅ Topic modeling completed. Clusters assigned.
-🤖 Using OpenAI to classify X segments into topics...
+🤖 Using Groq (Llama) to classify X segments into topics...
 ✅ AI classified X segments into Y topics
 ```
 
@@ -112,7 +115,7 @@ When working correctly, you should see these logs in Vercel:
 3. Check Vercel function logs
 4. Look for the log messages above
 
-If you see `❌ OpenAI API key NOT FOUND`, that's the issue - add it to Vercel env vars!
+If you see `⚠️ HUGGINGFACE_API_KEY not set` or `⚠️ GROQ_API_KEY not set`, add those free keys to Vercel env vars!
 
 ## Still Not Working?
 
@@ -120,4 +123,4 @@ If you've done all the above and it's still not working:
 
 1. **Check the exact error** in Vercel function logs
 2. **Share the error message** - it will tell us exactly what's wrong
-3. **Verify the API key** is correct (should start with `sk-`)
+3. **Verify API keys**: HF token starts with `hf_`, Groq key starts with `gsk_`

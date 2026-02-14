@@ -27,19 +27,24 @@ const supabasePublic = supabaseUrl && supabaseAnonKey
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
 const ASSEMBLYAI_BASE_URL = 'https://api.assemblyai.com/v2';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_API_KEY;
+const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN;
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
-// Log OpenAI availability (for debugging)
-if (OPENAI_API_KEY) {
-  console.log('✅ OpenAI API key found - will use GPT for style classification');
-  console.log(`✅ OpenAI API key length: ${OPENAI_API_KEY.length}`);
+// Log API availability (for debugging)
+if (HUGGINGFACE_API_KEY) {
+  console.log('✅ Hugging Face API key found - topic modeling embeddings');
 } else {
-  console.log('❌ OpenAI API key NOT FOUND - using keyword-based classification');
-  console.log('   Set OPENAI_API_KEY environment variable for more accurate results');
-  console.log('   Current env vars:', {
-    hasOpenAI: !!OPENAI_API_KEY,
-    hasAssemblyAI: !!ASSEMBLYAI_API_KEY,
-    hasSupabase: !!supabaseUrl
-  });
+  console.log('⚠️ HUGGINGFACE_API_KEY not set - embeddings will fail (use free tier at huggingface.co)');
+}
+if (GROQ_API_KEY) {
+  console.log('✅ Groq API key found - header generation (free tier)');
+} else {
+  console.log('⚠️ GROQ_API_KEY not set - will use keyword-based header fallback');
+}
+if (OPENAI_API_KEY) {
+  console.log('✅ OpenAI API key found - will use for style classification (Find Your Style)');
+} else {
+  console.log('❌ OpenAI API key NOT FOUND - style classification may be limited');
 }
 
 // ---------- Analysis helpers (serverless / mock) ----------
@@ -371,47 +376,62 @@ function euclideanDistance(a, b) {
 }
 
 /**
- * Get embeddings for segment texts using OpenAI
+ * Get embeddings for segment texts using Hugging Face (free inference API)
+ * Uses sentence-transformers/all-MiniLM-L6-v2 for 384-dim vectors
  */
 async function getEmbeddings(texts) {
-  if (!OPENAI_API_KEY || OPENAI_API_KEY === 'your_openai_api_key_here') {
-    console.error('❌ OpenAI API key not configured for embeddings');
-    console.error('❌ DEBUG - Environment check:', {
-      OPENAI_API_KEY_exists: !!process.env.OPENAI_API_KEY,
-      OPENAI_API_KEY_length: process.env.OPENAI_API_KEY?.length || 0,
-      VITE_OPENAI_API_KEY_exists: !!process.env.VITE_OPENAI_API_KEY,
-      OPENAI_API_KEY_var: !!OPENAI_API_KEY,
-      OPENAI_API_KEY_isPlaceholder: OPENAI_API_KEY === 'your_openai_api_key_here'
-    });
-    throw new Error('OpenAI API key required for embeddings. Please set OPENAI_API_KEY environment variable in Vercel dashboard.');
+  if (!HUGGINGFACE_API_KEY || HUGGINGFACE_API_KEY === 'your_huggingface_api_key_here') {
+    console.error('❌ Hugging Face API key not configured for embeddings');
+    throw new Error('HUGGINGFACE_API_KEY required for embeddings. Get a free token at huggingface.co/settings/tokens');
   }
 
-  console.log(`🔑 Using OpenAI API key (length: ${OPENAI_API_KEY.length})`);
-  console.log(`🔑 Key preview: ${OPENAI_API_KEY.substring(0, 10)}...${OPENAI_API_KEY.substring(OPENAI_API_KEY.length - 4)}`);
+  const HF_EMBEDDING_URL = 'https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2';
+  const BATCH_SIZE = 32; // HF free tier may limit batch size
+  const maxRetries = 2;
 
-  try {
-    console.log(`📤 Sending ${texts.length} texts to OpenAI embeddings API...`);
-    const response = await fetch('https://api.openai.com/v1/embeddings', {
+  const fetchBatch = async (batch, retries = maxRetries) => {
+    const response = await fetch(HF_EMBEDDING_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`
+        'Authorization': `Bearer ${HUGGINGFACE_API_KEY}`
       },
-      body: JSON.stringify({
-        model: 'text-embedding-3-small',
-        input: texts
-      })
+      body: JSON.stringify({ inputs: batch })
     });
+
+    if (response.status === 503 && retries > 0) {
+      console.log('⏳ Model loading (503), retrying in 5s...');
+      await sleep(5000);
+      return fetchBatch(batch, retries - 1);
+    }
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      console.error(`❌ OpenAI embeddings API error: ${response.status}`, errorData);
-      throw new Error(`OpenAI embeddings error: ${response.status} - ${errorData.error?.message || response.statusText}`);
+      console.error(`❌ Hugging Face embeddings API error: ${response.status}`, errorData);
+      throw new Error(`Hugging Face embeddings: ${response.status} - ${errorData.error || response.statusText}`);
     }
 
     const data = await response.json();
-    console.log(`✅ Received ${data.data?.length || 0} embeddings from OpenAI`);
-    return data.data.map(item => item.embedding);
+    // HF returns [[...], [...]] for multiple inputs, or [...] for single input
+    if (Array.isArray(data) && Array.isArray(data[0])) {
+      return data;
+    }
+    if (Array.isArray(data) && typeof data[0] === 'number') {
+      return [data];
+    }
+    throw new Error('Unexpected Hugging Face response format');
+  };
+
+  try {
+    console.log(`📤 Sending ${texts.length} texts to Hugging Face embeddings API...`);
+    const allEmbeddings = [];
+    for (let i = 0; i < texts.length; i += BATCH_SIZE) {
+      const batch = texts.slice(i, i + BATCH_SIZE);
+      const batchEmbeddings = await fetchBatch(batch);
+      allEmbeddings.push(...batchEmbeddings);
+    }
+    console.log(`✅ Received ${allEmbeddings.length} embeddings from Hugging Face (dim: ${allEmbeddings[0]?.length || 0})`);
+    return allEmbeddings;
   } catch (error) {
     console.error('❌ Failed to get embeddings:', error.message);
     throw error;
@@ -466,14 +486,18 @@ async function performTopicModeling(segments, minClusters = 2, maxClusters = 8) 
     return segments.map(s => ({ ...s, cluster: 0 }));
   }
 
-  // If only 1 segment, can't cluster
   if (segments.length === 1) {
     console.log('⚠️ Only 1 segment, skipping clustering');
     return segments.map(s => ({ ...s, cluster: 0 }));
   }
 
+  if (!HUGGINGFACE_API_KEY || HUGGINGFACE_API_KEY === 'your_huggingface_api_key_here') {
+    console.log('⚠️ HUGGINGFACE_API_KEY not set, assigning single cluster');
+    return segments.map(s => ({ ...s, cluster: 0 }));
+  }
+
   try {
-    // Get embeddings for all segment texts
+    // Get embeddings for all segment texts (Hugging Face)
     const texts = segments.map(s => (s.text || '').substring(0, 8000));
     console.log(`🔍 Getting embeddings for ${texts.length} segments...`);
     
@@ -554,11 +578,11 @@ const classifyJokesWithAI = async (segments) => {
     return segments;
   }
 
-  // First, perform topic modeling to get clusters
+  // First, perform topic modeling to get clusters (uses Hugging Face embeddings)
   let clusteredSegments;
   try {
     console.log(`🎯 Starting topic modeling for ${segments.length} segments...`);
-    console.log(`🔍 OPENAI_API_KEY available: ${!!OPENAI_API_KEY} (length: ${OPENAI_API_KEY?.length || 0})`);
+    console.log(`🔍 HUGGINGFACE_API_KEY available: ${!!HUGGINGFACE_API_KEY}`);
     console.log(`🔍 First segment sample: "${(segments[0]?.text || '').substring(0, 100)}..."`);
     clusteredSegments = await performTopicModeling(segments);
     console.log(`✅ Topic modeling completed. Clusters assigned.`);
@@ -573,11 +597,9 @@ const classifyJokesWithAI = async (segments) => {
     clusteredSegments = segments.map((s, idx) => ({ ...s, cluster: 0 }));
   }
 
-  // If OpenAI API key is not available, use fallback topic extraction
-  if (!OPENAI_API_KEY || OPENAI_API_KEY === 'your_openai_api_key_here') {
-    console.log('❌ OpenAI API key not found, using keyword-based topic extraction');
-    console.log('❌ This means topic modeling with embeddings will not work!');
-    console.log('❌ Please add OPENAI_API_KEY to Vercel environment variables');
+  // If Groq API key is not available, use fallback topic extraction
+  if (!GROQ_API_KEY || GROQ_API_KEY === 'your_groq_api_key_here') {
+    console.log('ℹ️ Groq API key not found, using keyword-based topic extraction');
     return clusteredSegments.map(segment => ({
       ...segment,
       matchedHeader: validateHeader(extractSegmentTopic(segment.text || '', new Set()) || `Joke ${segment.index + 1}`),
@@ -586,7 +608,7 @@ const classifyJokesWithAI = async (segments) => {
   }
 
   try {
-    console.log(`🤖 Using OpenAI to classify ${segments.length} segments into topics...`);
+    console.log(`🤖 Using Groq (Llama) to classify ${segments.length} segments into topics...`);
     
     // Prepare segment texts with indices and clusters
     const segmentsList = segments.map((segment, idx) => {
@@ -629,14 +651,14 @@ ${segmentsList}
 
 Remember: Headers must be ≤5 words. Return JSON now:`;
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`
+        'Authorization': `Bearer ${GROQ_API_KEY}`
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: 'llama-3.1-8b-instant',
         messages: [
           {
             role: 'system',
@@ -648,14 +670,13 @@ Remember: Headers must be ≤5 words. Return JSON now:`;
           }
         ],
         temperature: 0.5,
-        max_tokens: 3000,
-        response_format: { type: 'json_object' }
+        max_tokens: 3000
       })
     });
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(`OpenAI API error: ${response.status} - ${errorData.error?.message || response.statusText}`);
+      throw new Error(`Groq API error: ${response.status} - ${errorData.error?.message || response.statusText}`);
     }
 
     const data = await response.json();
@@ -721,7 +742,7 @@ Remember: Headers must be ≤5 words. Return JSON now:`;
     return classifiedSegments;
 
   } catch (error) {
-    console.error('⚠️ OpenAI classification failed, using keyword-based fallback:', error.message);
+    console.error('⚠️ Groq classification failed, using keyword-based fallback:', error.message);
     // Fallback to keyword-based topic extraction
     return clusteredSegments.map(segment => {
       const fallbackHeader = validateHeader(extractSegmentTopic(segment.text || '', new Set()) || `Joke ${segment.index !== undefined ? segment.index + 1 : segments.indexOf(segment) + 1}`);
@@ -734,27 +755,26 @@ Remember: Headers must be ≤5 words. Return JSON now:`;
   }
 };
 
-// Generate a joke header using AI (OpenAI)
+// Generate a joke header using AI (Groq - free tier)
 const generateJokeHeaderWithAI = async (segmentText) => {
-  if (!OPENAI_API_KEY || !segmentText || segmentText.trim().length < 10) {
+  if (!GROQ_API_KEY || !segmentText || segmentText.trim().length < 10) {
     return null;
   }
 
   try {
-    // Truncate if too long (OpenAI token limit)
-    const maxLength = 500; // ~125 words
+    const maxLength = 500;
     const truncatedText = segmentText.length > maxLength
       ? segmentText.substring(0, maxLength) + '...'
       : segmentText;
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Authorization': `Bearer ${GROQ_API_KEY}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'gpt-3.5-turbo',
+        model: 'llama-3.1-8b-instant',
         messages: [
           {
             role: 'system',
@@ -766,12 +786,12 @@ const generateJokeHeaderWithAI = async (segmentText) => {
           }
         ],
         temperature: 0.7,
-        max_tokens: 20 // Short headers only
+        max_tokens: 20
       })
     });
 
     if (!response.ok) {
-      console.error('OpenAI API error generating header:', response.status);
+      console.error('Groq API error generating header:', response.status);
       return null;
     }
 
