@@ -1182,14 +1182,19 @@ export default async function handler(req, res) {
           });
         }
 
-        // Aggregate laughs by topic for analysis
-        const topicSummaries = jokeMetrics.reduce((acc, j) => {
-          const t = j.topic || 'Other';
-          if (!acc[t]) acc[t] = { laughs: 0, jokeCount: 0 };
-          acc[t].laughs += j.laughs || 0;
-          acc[t].jokeCount += 1;
-          return acc;
-        }, {});
+        // Aggregate laughs by topic (normalize keys to avoid duplicates from case/whitespace)
+        const byNorm = {};
+        for (const j of jokeMetrics) {
+          const raw = (j.topic || 'Other').trim();
+          const norm = raw.toLowerCase();
+          if (!byNorm[norm]) byNorm[norm] = { laughs: 0, jokeCount: 0, topic: raw };
+          byNorm[norm].laughs += j.laughs || 0;
+          byNorm[norm].jokeCount += 1;
+        }
+        const topicSummaries = {};
+        for (const data of Object.values(byNorm)) {
+          topicSummaries[data.topic] = { laughs: data.laughs, jokeCount: data.jokeCount };
+        }
 
         const avgLaughsPerJoke = jokeMetrics.length ? totalLaughs / jokeMetrics.length : 0;
         const category = categorize(laughsPerMinute, avgLaughsPerJoke);

@@ -860,17 +860,42 @@ function Analysis() {
                 </div>
               </div>
 
-              {/* Topics aggregated by laughs */}
+              {/* Topics aggregated by laughs (normalize keys to merge duplicates) */}
               {(() => {
-                const topicSummaries = analysisResult.topicSummaries && Object.keys(analysisResult.topicSummaries).length > 0
+                const buildTopicSummaries = () => {
+                  const metrics = analysisResult.jokeMetrics || [];
+                  const extracted = analysisResult.extractedJokes || [];
+                  const byNorm = {};
+                  for (let i = 0; i < metrics.length; i++) {
+                    const topic = (metrics[i].topic ?? extracted[i]?.topic ?? 'Other').toString().trim();
+                    const norm = topic.toLowerCase();
+                    const laughs = metrics[i].laughs || 0;
+                    if (!byNorm[norm]) byNorm[norm] = { laughs: 0, jokeCount: 0, topic };
+                    byNorm[norm].laughs += laughs;
+                    byNorm[norm].jokeCount += 1;
+                  }
+                  const result = {};
+                  for (const data of Object.values(byNorm)) {
+                    result[data.topic] = { laughs: data.laughs, jokeCount: data.jokeCount };
+                  }
+                  return result;
+                };
+                const raw = analysisResult.topicSummaries && Object.keys(analysisResult.topicSummaries).length > 0
                   ? analysisResult.topicSummaries
-                  : (analysisResult.jokeMetrics || []).reduce((acc, j) => {
-                      const t = j.topic || 'Other';
-                      if (!acc[t]) acc[t] = { laughs: 0, jokeCount: 0 };
-                      acc[t].laughs += j.laughs || 0;
-                      acc[t].jokeCount += 1;
-                      return acc;
-                    }, {});
+                  : buildTopicSummaries();
+                // Re-normalize to merge any legacy duplicate keys (case/whitespace)
+                const byNorm = {};
+                for (const [topic, data] of Object.entries(raw)) {
+                  const t = (topic || 'Other').trim();
+                  const norm = t.toLowerCase();
+                  if (!byNorm[norm]) byNorm[norm] = { laughs: 0, jokeCount: 0, topic: t };
+                  byNorm[norm].laughs += data.laughs || 0;
+                  byNorm[norm].jokeCount += data.jokeCount || 0;
+                }
+                const topicSummaries = {};
+                for (const data of Object.values(byNorm)) {
+                  topicSummaries[data.topic] = { laughs: data.laughs, jokeCount: data.jokeCount };
+                }
                 const topicsList = Object.entries(topicSummaries)
                   .map(([topic, data]) => ({ topic, ...data }))
                   .sort((a, b) => b.laughs - a.laughs);
