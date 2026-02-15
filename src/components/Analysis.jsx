@@ -748,26 +748,40 @@ function Analysis() {
             />
 
             <div className="joke-metrics-section">
-              <h3>Laughs per Joke</h3>
+              <h3>Laughs per Topic</h3>
+              <p className="section-description">Aggregated by detected topic (laughs summed)</p>
               <div className="joke-metrics-list">
-                {analysisResult.jokeMetrics.map((metric, index) => {
-                  const maxLaughs = analysisResult.maxLaughs || Math.max(...analysisResult.jokeMetrics.map(m => m.laughs), 1)
-                  const jokeHeader = metric.header || `Joke ${index + 1}`
-                  return (
-                    <div key={index} className="joke-metric-item">
+                {(() => {
+                  const metrics = analysisResult.jokeMetrics || [];
+                  const extracted = analysisResult.extractedJokes || [];
+                  const byNorm = {};
+                  for (let i = 0; i < metrics.length; i++) {
+                    const topic = (metrics[i].topic ?? extracted[i]?.topic ?? 'Other').toString().trim();
+                    const norm = topic.toLowerCase();
+                    const laughs = metrics[i].laughs || 0;
+                    if (!byNorm[norm]) byNorm[norm] = { laughs: 0, jokeCount: 0, topic };
+                    byNorm[norm].laughs += laughs;
+                    byNorm[norm].jokeCount += 1;
+                  }
+                  const topicsList = Object.values(byNorm)
+                    .map(d => ({ topic: d.topic, laughs: d.laughs, jokeCount: d.jokeCount }))
+                    .sort((a, b) => b.laughs - a.laughs);
+                  const maxLaughs = topicsList.length ? Math.max(...topicsList.map(t => t.laughs), 1) : 1;
+                  return topicsList.map((item, i) => (
+                    <div key={i} className="joke-metric-item">
                       <div className="joke-metric-header">
-                        <span className="joke-number">{jokeHeader}</span>
-                        <span className="laugh-count">{metric.laughs} laughs</span>
+                        <span className="joke-number">{item.topic.replace(/_/g, ' ')}</span>
+                        <span className="laugh-count">{item.laughs} laughs{item.jokeCount > 1 ? ` (${item.jokeCount} jokes)` : ''}</span>
                       </div>
                       <div className="laugh-bar">
-                        <div 
+                        <div
                           className="laugh-bar-fill"
-                          style={{ width: `${(metric.laughs / maxLaughs) * 100}%` }}
+                          style={{ width: `${(item.laughs / maxLaughs) * 100}%` }}
                         />
                       </div>
                     </div>
-                  )
-                })}
+                  ));
+                })()}
               </div>
             </div>
 
