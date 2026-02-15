@@ -591,6 +591,26 @@
   grid-column: span 2;
 }
 
+.ai-trimming .original {
+  color: #c62828;
+  font-style: italic;
+}
+
+.ai-trimming .suggestion {
+  color: #2e7d32;
+  font-weight: 500;
+}
+
+.ai-trimming .reason {
+  color: #666;
+  font-size: 0.85rem;
+}
+
+.ai-trimming .arrow {
+  color: #667eea;
+  font-weight: 600;
+}
+
 .efficiency-gain {
   color: #667eea;
   font-weight: 600;

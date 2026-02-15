@@ -781,20 +781,34 @@ function ComedyStyle() {
 
                 <div className="bloom-tool-card trimming-card">
                   <h4>Trimming Opportunities</h4>
-                  {analysisResult.bloomTools.trimming.totalRedundantSyllables > 0 ? (
+                  {((analysisResult.bloomTools.trimming.opportunities?.length > 0) ||
+                    (analysisResult.bloomTools.trimming.aiSuggestions?.length > 0)) ? (
                     <>
-                      <p className="detected">
-                        ✅ {analysisResult.bloomTools.trimming.totalRedundantSyllables} redundant syllables detected
-                      </p>
-                      <p className="efficiency-gain">
-                        Potential efficiency gain: {analysisResult.bloomTools.trimming.estimatedEfficiencyGain}
-                      </p>
-                      {analysisResult.bloomTools.trimming.opportunities?.length > 0 && (
+                      {(analysisResult.bloomTools.trimming.opportunities?.length > 0) && (
                         <div className="tool-examples">
-                          <strong>Suggestions:</strong>
+                          <strong>Rule-based:</strong>
                           <ul>
-                            {analysisResult.bloomTools.trimming.opportunities.slice(0, 5).map((opp, i) => (
-                              <li key={i}>{opp.suggestion || opp.pattern}</li>
+                            {analysisResult.bloomTools.trimming.opportunities.slice(0, 8).map((opp, i) => (
+                              <li key={i}>
+                                {typeof opp === 'string' ? opp : (opp.suggestion || opp.pattern)}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {(analysisResult.bloomTools.trimming.aiSuggestions?.length > 0) && (
+                        <div className="tool-examples ai-trimming">
+                          <strong>AI suggestions:</strong>
+                          <ul>
+                            {analysisResult.bloomTools.trimming.aiSuggestions.map((item, i) => (
+                              <li key={i}>
+                                <span className="original">"{item.original}"</span>
+                                <span className="arrow"> → </span>
+                                <span className="suggestion">{item.suggestion}</span>
+                                {item.reason && (
+                                  <span className="reason"> — {item.reason}</span>
+                                )}
+                              </li>
                             ))}
                           </ul>
                         </div>

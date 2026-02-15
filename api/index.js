@@ -1306,7 +1306,7 @@ export default async function handler(req, res) {
           // Analyze transcript directly (no words array, but analysis functions handle this)
           const styleTags = await analyzeComedyStyles(transcriptText);
           const writingElements = analyzeWritingElements(transcriptText, []); // Empty words array for direct text
-          const bloomTools = analyzeAdamBloomTools(transcriptText, []); // Empty words array
+          const bloomTools = await analyzeAdamBloomTools(transcriptText, []); // Empty words array
           const summary = generateStyleSummary(styleTags, writingElements, bloomTools);
 
           // Truncate transcript if too long
@@ -1406,7 +1406,7 @@ export default async function handler(req, res) {
         // Enhanced analysis with Adam Bloom tools
         const styleTags = await analyzeComedyStyles(transcriptText);
         const writingElements = analyzeWritingElements(transcriptText, words);
-        const bloomTools = analyzeAdamBloomTools(transcriptText, words);
+        const bloomTools = await analyzeAdamBloomTools(transcriptText, words);
         const summary = generateStyleSummary(styleTags, writingElements, bloomTools);
 
         // Truncate transcript if too long to avoid response size limits
@@ -1879,14 +1879,14 @@ const analyzeWritingElements = (transcriptText, words = []) => {
 };
 
 // Analyze Adam Bloom's comedy tools
-const analyzeAdamBloomTools = (transcriptText, words = []) => {
+const analyzeAdamBloomTools = async (transcriptText, words = []) => {
   if (!transcriptText) {
     return {
       seesawTheory: { detected: false, description: 'Setup should be longer than punchline' },
       balloonPop: { detected: false, description: 'Tension builds then releases at reveal' },
       wordSmuggling: { detected: false, description: 'Punchline word hidden in casual sentence' },
       toppers: { detected: false, description: 'Follow-up jokes on same premise' },
-      trimming: { opportunities: [], description: 'Redundant syllables/words to remove' }
+      trimming: { opportunities: [], aiSuggestions: [], description: 'Redundant syllables/words to remove' }
     };
   }
 
@@ -1966,6 +1966,8 @@ const analyzeAdamBloomTools = (transcriptText, words = []) => {
     }
   });
 
+  const aiSuggestions = await getAITrimmingRecommendations(transcriptText);
+
   return {
     seesawTheory: { 
       detected: seesawDetected, 
@@ -1984,10 +1986,81 @@ const analyzeAdamBloomTools = (transcriptText, words = []) => {
       description: 'Follow-up jokes on the same premise (requires comparison with previous bits)' 
     },
     trimming: { 
-      opportunities: trimmingOpportunities.slice(0, 10), // Limit to 10
+      opportunities: trimmingOpportunities.slice(0, 10),
+      aiSuggestions,
       description: 'Redundant syllables/words to remove for tighter delivery' 
     }
   };
+};
+
+// AI-powered trimming recommendations (Groq)
+const getAITrimmingRecommendations = async (transcriptText) => {
+  if (!GROQ_API_KEY || !transcriptText || transcriptText.trim().length < 100) {
+    return [];
+  }
+  const MAX_LENGTH = 2500;
+  const truncated = transcriptText.length > MAX_LENGTH
+    ? transcriptText.substring(0, MAX_LENGTH) + '...'
+    : transcriptText;
+
+  const prompt = `You are a comedy writing coach. Analyze this stand-up transcript and identify 5-8 specific trimming opportunities.
+Look for: filler words, redundant phrases, run-on sentences, wordy setups, over-explaining, or punchlines buried in extra words.
+
+For each opportunity, provide:
+- original: the exact phrase or sentence to trim (quote from transcript)
+- suggestion: the trimmed version or what to remove
+- reason: brief reason (one short sentence)
+
+Return ONLY a valid JSON array, no other text. Example:
+[
+  {"original": "So I was like, you know, basically going to the store", "suggestion": "So I was going to the store", "reason": "Filler words add no meaning"},
+  {"original": "It was really, really funny", "suggestion": "It was really funny", "reason": "Redundant 'really' weakens emphasis"}
+]
+
+Transcript:
+${truncated}
+
+JSON array:`;
+
+  try {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${GROQ_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        messages: [
+          {
+            role: 'system',
+            content: 'You identify trimming opportunities in comedy transcripts. Return only a valid JSON array of objects with keys: original, suggestion, reason.'
+          },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.3,
+        max_tokens: 1200
+      })
+    });
+
+    if (!response.ok) return [];
+    const data = await response.json();
+    const content = (data.choices?.[0]?.message?.content || '').trim();
+    const jsonMatch = content.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return [];
+    const arr = JSON.parse(jsonMatch[0]);
+    if (!Array.isArray(arr)) return [];
+    return arr.slice(0, 8).filter(item =>
+      item && typeof item.original === 'string' && typeof item.suggestion === 'string'
+    ).map(item => ({
+      original: String(item.original).trim(),
+      suggestion: String(item.suggestion).trim(),
+      reason: item.reason ? String(item.reason).trim() : ''
+    }));
+  } catch (err) {
+    console.error('AI trimming recommendations failed:', err.message);
+    return [];
+  }
 };
 
 // Generate a summary of the comedy style

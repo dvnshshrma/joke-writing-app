@@ -860,6 +860,38 @@ function Analysis() {
                 </div>
               </div>
 
+              {/* Topics aggregated by laughs */}
+              {(() => {
+                const topicSummaries = analysisResult.topicSummaries && Object.keys(analysisResult.topicSummaries).length > 0
+                  ? analysisResult.topicSummaries
+                  : (analysisResult.jokeMetrics || []).reduce((acc, j) => {
+                      const t = j.topic || 'Other';
+                      if (!acc[t]) acc[t] = { laughs: 0, jokeCount: 0 };
+                      acc[t].laughs += j.laughs || 0;
+                      acc[t].jokeCount += 1;
+                      return acc;
+                    }, {});
+                const topicsList = Object.entries(topicSummaries)
+                  .map(([topic, data]) => ({ topic, ...data }))
+                  .sort((a, b) => b.laughs - a.laughs);
+                if (topicsList.length === 0) return null;
+                return (
+                  <div className="topics-by-laughs">
+                    <h4>🎭 Topics by Laughs</h4>
+                    <p className="section-description">Aggregated by detected topic (total laughs summed)</p>
+                    <div className="topics-by-laughs-list">
+                      {topicsList.map((item, i) => (
+                        <div key={i} className="topic-by-laughs-item">
+                          <span className="topic-name">{item.topic}</span>
+                          <span className="topic-laughs">{item.laughs} laughs</span>
+                          <span className="topic-count">{item.jokeCount} joke{item.jokeCount !== 1 ? 's' : ''}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Extracted Jokes from Transcript */}
               {analysisResult.extractedJokes && analysisResult.extractedJokes.length > 0 && (
                 <div className="extracted-jokes-section">
