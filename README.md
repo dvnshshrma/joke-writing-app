@@ -30,7 +30,7 @@ A web application for stand-up comedians to organize, edit, and manage versions 
 - **Real AI Analysis**: Uses AssemblyAI for accurate speech and laugh detection
 - **Mock Analysis Fallback**: Works without API key using simulated data
 - **Laughs per Minute**: Track overall audience engagement
-- **Laughs per Joke**: See which jokes get the most laughs
+- **Laughs per Topic**: Topic-level bars with laughs summed across jokes
 - **Timeline Graph**: Visual timeline showing laughs throughout your set
 - **Category Classification**: Automatically categorizes sets as "Good", "Average", or "Bad"
 - **Exclude Applause**: Remove start and end applause for more accurate metrics
@@ -74,6 +74,7 @@ A web application for stand-up comedians to organize, edit, and manage versions 
 - **Taxonomy-Based**: Fixed comedy taxonomy (10 broad topics + subtopics), Groq (Llama) classifies each joke
 - **Joke Extraction**: Automatically extracts jokes from transcript using silence gaps
 - **Topic Summaries**: Laughs and joke counts aggregated per topic for analysis
+- **Normalized Aggregation**: Merges duplicate topic labels caused by case/whitespace differences
 - **Smart Headers**: Subtopic-based or keyword-based when Groq unavailable
 - **Minimum Joke Detection**: Ensures at least 4 jokes for a 7-minute set
 - **Comedy Categories**: Fallback classification into 15+ comedy topic categories
@@ -243,7 +244,7 @@ The built files will be in the `dist` directory.
    - Laughs per minute
    - Average laughs per joke
    - Timeline graph showing laughs throughout the set
-   - Per-joke metrics with visual bars
+   - Per-topic metrics with visual bars (laughs summed by topic)
    - Advanced insights and analytics
 5. View old analyses:
    - Browse all previous analyses
@@ -266,7 +267,26 @@ The built files will be in the `dist` directory.
    - **Style Tags**: Your comedy styles with confidence scores
    - **Writing Elements**: Detected writing techniques and percentages
    - **Adam Bloom Tools**: Analysis of specific comedy writing tools
+   - **Trimming Suggestions**: Rule-based suggestions plus AI suggestions (`original -> suggestion` with reason)
    - **Summary**: AI-generated overview of your comedy style
+
+### Current Analysis Algorithms
+
+#### Topic Modeling + Laugh Aggregation
+- Transcript is segmented into candidate joke chunks (time/structure heuristics).
+- Each chunk is classified into `topic` + `subtopic` using Groq taxonomy prompts (batched), with keyword fallback when Groq is unavailable.
+- Laugh timeline is computed from transcript timing and pause-derived signals.
+- Laughs are distributed across extracted jokes for display metrics.
+- Topic totals are then aggregated from joke metrics and normalized by topic key (`trim + lowercase`) so repeated labels collapse into one topic row.
+
+#### Find Your Style Trimming
+- Rule-based trimming detects filler words and redundant qualifier patterns.
+- Optional Groq pass (`llama-3.1-8b-instant`) analyzes up to ~2500 chars and returns 5-8 JSON suggestions:
+  - `original`
+  - `suggestion`
+  - `reason`
+- If Groq fails or no key is set, trimming gracefully falls back to rule-based only.
+- UI renders both rule-based opportunities and AI suggestions.
 
 ### Data Storage
 
@@ -314,10 +334,12 @@ joke-writing-app/
 ├── server/
 │   ├── server-supabase.js       # Express backend server
 │   ├── api/
-│   │   └── index.js             # Vercel serverless function entry
+│   │   └── index.js             # Legacy API entry
 │   ├── database-supabase.js     # Supabase database connection
 │   ├── create-analysis-table.sql # SQL script for analysis table
 │   └── create-sets-table.sql    # SQL script for sets table
+├── api/
+│   └── index.js                 # Primary Vercel serverless API (analysis + comedy style)
 ├── index.html
 ├── package.json
 └── vite.config.js
@@ -346,7 +368,7 @@ joke-writing-app/
 - Saved sets list with edit/delete functionality
 - Performance Analysis:
   - Audio upload and analysis
-  - Laughs per minute and per joke metrics
+  - Laughs per minute and topic-aggregated metrics
   - Timeline graph visualization
   - Category classification (Good/Average/Bad)
   - Exclude applause feature
@@ -406,10 +428,16 @@ The backend provides REST API endpoints:
 - `DELETE /api/sets/:id` - Delete a set
 
 ### Analysis
-- `POST /api/analysis/analyze` - Upload audio and analyze a set
+- `POST /api/analysis/analyze` - Start an analysis job (AssemblyAI flow via uploaded media)
+- `GET /api/analysis/job/:jobId` - Poll analysis job status and fetch computed metrics
 - `GET /api/analysis` - Get all analyses
 - `GET /api/analysis/:id` - Get a specific analysis
 - `DELETE /api/analysis/:id` - Delete an analysis
+
+### Comedy Style
+- `POST /api/comedy-style/analyze` - Start style analysis from uploaded media
+- `GET /api/comedy-style/job/:jobId` - Poll style analysis job status and fetch style results
+- `POST /api/comedy-style/analyze-text` - Analyze pasted transcript text directly
 
 ## Database Tables
 
