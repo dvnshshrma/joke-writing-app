@@ -124,9 +124,181 @@ const computeLaughTimelineFromWords = (words = [], effectiveDurationSeconds = 0,
       const t = Math.max(0, Math.floor((words[i - 1].end ?? 0) / 1000));
       const idx = Math.min(buckets.length - 1, Math.floor(t / stepSeconds));
       buckets[idx] += 1;
+      // NOTE: keep this as a simple count (+=1). Do not add intensity weighting here —
+      // this timeline is used for topic aggregations and interval comparisons where
+      // a consistent unit matters more than magnitude.
     }
   }
   return buckets.map((laughs, i) => ({ time: i * stepSeconds, laughs }));
+};
+
+// Returns raw laugh events with timestamps — used for per-joke mapping and peak detection.
+// Unlike computeLaughTimelineFromWords (bucketed counts), this preserves individual events.
+const computeLaughEventsFromWords = (words = []) => {
+  const events = [];
+  for (let i = 1; i < words.length; i++) {
+    const gap = (words[i].start ?? 0) - (words[i - 1].end ?? 0);
+    if (gap >= LAUGH_GAP_THRESHOLD_MS) {
+      events.push({
+        time: (words[i - 1].end ?? 0) / 1000, // seconds from start of audio
+        gap,                                    // milliseconds
+        isPeak: gap >= 3000                     // 3s+ gap = big audience reaction
+      });
+    }
+  }
+  return events;
+};
+
+// Compute the six performance dimensions from raw analysis data.
+// All inputs should already be trimmed to the effective (applause-excluded) duration.
+const computePerformanceDimensions = (timeline, laughEvents, extractedJokes, effectiveDuration) => {
+  if (!timeline.length || effectiveDuration <= 0) return null;
+
+  // 1. Engagement Rate — LPM from timeline bucket count
+  const totalLaughs = timeline.reduce((s, b) => s + (b.laughs || 0), 0);
+  const lpm = (totalLaughs / effectiveDuration) * 60;
+
+  // 2. Consistency — coefficient of variation of LPM across 3-minute intervals.
+  //    CV = stdDev / mean. We invert so 1.0 = perfectly even, 0.0 = erratic.
+  const INTERVAL_S = 180;
+  const intervals = [];
+  for (let start = 0; start < effectiveDuration; start += INTERVAL_S) {
+    const end = Math.min(start + INTERVAL_S, effectiveDuration);
+    const bucketLaughs = timeline
+      .filter(b => b.time >= start && b.time < end)
+      .reduce((s, b) => s + (b.laughs || 0), 0);
+    intervals.push((bucketLaughs / (end - start)) * 60);
+  }
+  const meanLPM = intervals.reduce((s, v) => s + v, 0) / Math.max(1, intervals.length);
+  const variance = intervals.reduce((s, v) => s + Math.pow(v - meanLPM, 2), 0) / Math.max(1, intervals.length);
+  const cv = meanLPM > 0 ? Math.sqrt(variance) / meanLPM : 1;
+  const consistencyScore = parseFloat(Math.max(0, Math.min(1, 1 - Math.min(cv, 1))).toFixed(2));
+
+  // 3. Trajectory — second-half LPM divided by first-half LPM.
+  //    > 1.0 = building set, < 1.0 = fading set.
+  const mid = effectiveDuration / 2;
+  const firstLaughs = timeline.filter(b => b.time < mid).reduce((s, b) => s + (b.laughs || 0), 0);
+  const secondLaughs = timeline.filter(b => b.time >= mid).reduce((s, b) => s + (b.laughs || 0), 0);
+  const firstHalfLPM = (firstLaughs / (mid / 60));
+  const secondHalfLPM = (secondLaughs / ((effectiveDuration - mid) / 60));
+  const trajectoryRatio = parseFloat(
+    (firstHalfLPM > 0 ? secondHalfLPM / firstHalfLPM : (secondHalfLPM > 0 ? 2 : 1)).toFixed(2)
+  );
+
+  // 4. Hit Rate — % of joke segments that had at least one laugh event in their time window.
+  //    Requires extractedJokes to have startTime/endTime from AssemblyAI chapters or segmentation.
+  const timedJokes = (extractedJokes || []).filter(j => j.startTime != null && j.endTime != null);
+  let hitCount = 0;
+  for (const joke of timedJokes) {
+    if (laughEvents.some(e => e.time >= joke.startTime && e.time < joke.endTime)) hitCount++;
+  }
+  const hitRate = timedJokes.length > 0
+    ? parseFloat((hitCount / timedJokes.length).toFixed(2))
+    : null;
+
+  // 5. Peak Moments — laugh events where the silence lasted 3+ seconds.
+  //    These are the moments the room genuinely erupted.
+  const peakCount = laughEvents.filter(e => e.isPeak).length;
+
+  // 6. Dead Zones — 30-second windows with zero laugh events.
+  //    More than 2-3 per set signals extended rough patches.
+  const DEAD_ZONE_WINDOW = 30;
+  let deadZoneCount = 0;
+  for (let start = 0; start < effectiveDuration; start += DEAD_ZONE_WINDOW) {
+    const end = Math.min(start + DEAD_ZONE_WINDOW, effectiveDuration);
+    if (end - start < 15) continue; // skip tiny trailing windows
+    const windowLaughs = timeline
+      .filter(b => b.time >= start && b.time < end)
+      .reduce((s, b) => s + (b.laughs || 0), 0);
+    if (windowLaughs === 0) deadZoneCount++;
+  }
+
+  return {
+    lpm: parseFloat(lpm.toFixed(2)),
+    consistencyScore,
+    trajectoryRatio,
+    hitRate,
+    hitCount,
+    totalJokes: timedJokes.length,
+    peakCount,
+    deadZoneCount,
+    firstHalfLPM: parseFloat(firstHalfLPM.toFixed(2)),
+    secondHalfLPM: parseFloat(secondHalfLPM.toFixed(2)),
+    totalLaughs,
+    effectiveDuration
+  };
+};
+
+// Map dimensions to a named performance profile with an actionable description.
+// Decision tree ordered strongest → weakest so the best-matching label wins.
+const derivePerformanceProfile = (dimensions) => {
+  if (!dimensions) {
+    return { name: 'Unrated', description: 'Not enough data to rate this performance.', color: 'gray' };
+  }
+  const { lpm, consistencyScore, trajectoryRatio, peakCount, deadZoneCount, effectiveDuration } = dimensions;
+  const deadZoneRate = effectiveDuration > 0 ? deadZoneCount / (effectiveDuration / 300) : 0;
+
+  if (lpm >= 5 && consistencyScore >= 0.65 && trajectoryRatio >= 1.1) {
+    return {
+      name: 'Killing It',
+      description: 'Strong, consistent engagement that builds to a great close. The room was with you the whole set.',
+      color: 'green'
+    };
+  }
+  if (lpm >= 4 && consistencyScore >= 0.55 && deadZoneRate <= 2) {
+    return {
+      name: 'Strong Set',
+      description: 'Solid engagement with good consistency. A few spots to tighten but the material is landing.',
+      color: 'green'
+    };
+  }
+  if (lpm >= 3 && peakCount >= 2 && consistencyScore < 0.5) {
+    return {
+      name: 'Peaks and Valleys',
+      description: 'Big moments but inconsistent between bits. Study what\'s working between the peaks — the transitions may be the issue.',
+      color: 'yellow'
+    };
+  }
+  if (lpm >= 2.5 && trajectoryRatio < 0.7) {
+    return {
+      name: 'Front-Loaded',
+      description: 'Strong opening that loses momentum. The closer isn\'t landing — restructure the set order or strengthen the last two minutes.',
+      color: 'yellow'
+    };
+  }
+  if (lpm >= 2 && trajectoryRatio >= 1.5) {
+    return {
+      name: 'Slow Burn',
+      description: 'The set builds significantly in the second half. The material works — focus on warming the room up faster with a stronger opener.',
+      color: 'yellow'
+    };
+  }
+  if (lpm >= 2 && consistencyScore >= 0.55 && peakCount === 0) {
+    return {
+      name: 'Polite Room',
+      description: 'Consistent reactions but no big moments. The room is responding but not erupting — punch up the punchlines.',
+      color: 'yellow'
+    };
+  }
+  if (lpm >= 1.5 && deadZoneRate <= 2) {
+    return {
+      name: 'Finding Your Footing',
+      description: 'Some moments landing but not consistently. Focus on tightening the setup-to-punchline ratio.',
+      color: 'yellow'
+    };
+  }
+  if (deadZoneRate >= 3) {
+    return {
+      name: 'Rough Night',
+      description: 'Multiple extended dead zones throughout. Focus on the first two minutes — winning the room early changes everything.',
+      color: 'red'
+    };
+  }
+  return {
+    name: 'Needs Work',
+    description: 'Low engagement throughout. Sharpen the punchlines and tighten the setups before the next outing.',
+    color: 'red'
+  };
 };
 
 // Robust calculation of advanced analytics from AssemblyAI transcript
@@ -1132,7 +1304,9 @@ export default async function handler(req, res) {
             effectiveDuration: a.effective_duration || null,
             fullDuration: a.full_duration || null,
             excludedStart: a.excluded_start || 0,
-            excludedEnd: a.excluded_end || 0
+            excludedEnd: a.excluded_end || 0,
+            performanceDimensions: a.performance_dimensions || null,
+            performanceProfile: a.performance_profile ? { name: a.performance_profile } : null
           });
         }
 
@@ -1178,14 +1352,22 @@ export default async function handler(req, res) {
           duration: segment.endTime && segment.startTime ? segment.endTime - segment.startTime : null
         }));
 
-        // Distribute laughs evenly across jokes for display
+        // Extract raw laugh events (needed for per-joke mapping, peaks, hit rate)
+        const laughEvents = computeLaughEventsFromWords(job.words || []);
+
+        // Map actual laugh events to each joke's time window instead of distributing evenly.
+        // This gives an accurate per-joke laugh count and enables reliable hit-rate calculation.
         if (jokeMetrics.length) {
-          const per = Math.floor(totalLaughs / jokeMetrics.length);
-          let rem = totalLaughs - per * jokeMetrics.length;
-          jokeMetrics = jokeMetrics.map(j => {
-            const add = rem > 0 ? 1 : 0;
-            rem -= add;
-            return { ...j, laughs: per + add };
+          jokeMetrics = jokeMetrics.map((j, idx) => {
+            const joke = extractedJokes[idx];
+            if (joke && joke.startTime != null && joke.endTime != null) {
+              const jokeLaughs = laughEvents.filter(
+                e => e.time >= joke.startTime && e.time < joke.endTime
+              ).length;
+              return { ...j, laughs: jokeLaughs };
+            }
+            // Fallback for jokes without timestamps: share total evenly
+            return { ...j, laughs: Math.floor(totalLaughs / jokeMetrics.length) };
           });
         }
 
@@ -1206,6 +1388,12 @@ export default async function handler(req, res) {
         const avgLaughsPerJoke = jokeMetrics.length ? totalLaughs / jokeMetrics.length : 0;
         const category = categorize(laughsPerMinute, avgLaughsPerJoke);
 
+        // Performance dimensions and profile
+        const performanceDimensions = computePerformanceDimensions(
+          timeline, laughEvents, extractedJokes, calculatedEffectiveDuration
+        );
+        const performanceProfile = derivePerformanceProfile(performanceDimensions);
+
         const analysisDoc = {
           id: jobId,
           set_id: setId || `${Date.now()}`,
@@ -1218,6 +1406,8 @@ export default async function handler(req, res) {
           joke_metrics: jokeMetrics,
           extracted_jokes: extractedJokes,
           topic_summaries: topicSummaries,
+          performance_profile: performanceProfile.name,
+          performance_dimensions: performanceDimensions,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           user_id: user?.id || null,
@@ -1230,15 +1420,16 @@ export default async function handler(req, res) {
           excluded_end: excludedEnd
         };
 
-        // Try to save transcript text if the column exists; otherwise save without it.
+        // Try to save transcript text + new columns if they exist; gracefully degrade if not.
         const { error: insertErr1 } = await supabaseAdmin.from('analysis_results').insert([{
           ...analysisDoc,
           transcript_text: job.text || ''
         }]);
         if (insertErr1) {
           const msg = insertErr1.message || insertErr1.details || '';
-          if (msg.includes('transcript_text') || msg.includes('topic_summaries') || msg.includes('schema cache')) {
-            const { topic_summaries: _ts, ...fallbackDoc } = analysisDoc;
+          if (msg.includes('transcript_text') || msg.includes('topic_summaries') || msg.includes('performance_') || msg.includes('schema cache')) {
+            // Strip columns that may not exist yet in older DB schemas
+            const { topic_summaries: _ts, performance_profile: _pp, performance_dimensions: _pd, ...fallbackDoc } = analysisDoc;
             const { error: insertErr2 } = await supabaseAdmin.from('analysis_results').insert([fallbackDoc]);
             if (insertErr2) throw insertErr2;
           } else {
@@ -1255,7 +1446,7 @@ export default async function handler(req, res) {
           category,
           timeline,
           jokeMetrics,
-          extractedJokes: extractedJokes,
+          extractedJokes,
           topicSummaries,
           transcriptText,
           isMockData: false,
@@ -1265,7 +1456,9 @@ export default async function handler(req, res) {
           fullDuration,
           speakingPace,
           wordCount,
-          silenceCount
+          silenceCount,
+          performanceDimensions,
+          performanceProfile
         });
       }
     }

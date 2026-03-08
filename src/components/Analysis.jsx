@@ -6,6 +6,187 @@ import { setsAPI } from '../services/setsAPI'
 import { analysisAPI } from '../services/analysisAPI'
 import './Analysis.css'
 
+// ─── Performance profile helpers (frontend) ──────────────────────────────────
+// Used as a fallback for older saved analyses that pre-date the backend computation.
+// New analyses receive performanceDimensions + performanceProfile directly from the API.
+
+function computeDimensionsFromResult(result) {
+  const timeline = result.timeline || []
+  const effectiveDuration = result.effectiveDuration || 0
+  if (!timeline.length || effectiveDuration <= 0) return null
+
+  const totalLaughs = timeline.reduce((s, b) => s + (b.laughs || 0), 0)
+  const lpm = (totalLaughs / effectiveDuration) * 60
+
+  // Consistency — CV across 3-min intervals
+  const INTERVAL = 180
+  const intervals = []
+  for (let start = 0; start < effectiveDuration; start += INTERVAL) {
+    const end = Math.min(start + INTERVAL, effectiveDuration)
+    const bucketLaughs = timeline.filter(b => b.time >= start && b.time < end).reduce((s, b) => s + (b.laughs || 0), 0)
+    intervals.push((bucketLaughs / (end - start)) * 60)
+  }
+  const meanLPM = intervals.reduce((s, v) => s + v, 0) / Math.max(1, intervals.length)
+  const variance = intervals.reduce((s, v) => s + Math.pow(v - meanLPM, 2), 0) / Math.max(1, intervals.length)
+  const cv = meanLPM > 0 ? Math.sqrt(variance) / meanLPM : 1
+  const consistencyScore = Math.max(0, Math.min(1, 1 - Math.min(cv, 1)))
+
+  // Trajectory — second half vs first half
+  const mid = effectiveDuration / 2
+  const firstLaughs = timeline.filter(b => b.time < mid).reduce((s, b) => s + (b.laughs || 0), 0)
+  const secondLaughs = timeline.filter(b => b.time >= mid).reduce((s, b) => s + (b.laughs || 0), 0)
+  const firstHalfLPM = firstLaughs / (mid / 60)
+  const secondHalfLPM = secondLaughs / ((effectiveDuration - mid) / 60)
+  const trajectoryRatio = firstHalfLPM > 0 ? secondHalfLPM / firstHalfLPM : (secondHalfLPM > 0 ? 2 : 1)
+
+  // Hit rate — from jokeMetrics if not evenly distributed
+  const jokeMetrics = result.jokeMetrics || []
+  const hitCount = jokeMetrics.filter(j => (j.laughs || 0) > 0).length
+  const hitRate = jokeMetrics.length > 0 ? hitCount / jokeMetrics.length : null
+
+  // Peak moments — approximate from high-laugh buckets (can't get exact gap durations frontend-side)
+  const peakCount = timeline.filter(b => b.laughs >= 3).length
+
+  // Dead zones — 30-second windows with no laughs
+  const DEAD_WINDOW = 30
+  let deadZoneCount = 0
+  for (let start = 0; start < effectiveDuration; start += DEAD_WINDOW) {
+    const end = Math.min(start + DEAD_WINDOW, effectiveDuration)
+    if (end - start < 15) continue
+    const w = timeline.filter(b => b.time >= start && b.time < end).reduce((s, b) => s + (b.laughs || 0), 0)
+    if (w === 0) deadZoneCount++
+  }
+
+  return {
+    lpm: parseFloat(lpm.toFixed(2)),
+    consistencyScore: parseFloat(consistencyScore.toFixed(2)),
+    trajectoryRatio: parseFloat(trajectoryRatio.toFixed(2)),
+    hitRate: hitRate !== null ? parseFloat(hitRate.toFixed(2)) : null,
+    hitCount,
+    totalJokes: jokeMetrics.length,
+    peakCount,
+    deadZoneCount,
+    firstHalfLPM: parseFloat(firstHalfLPM.toFixed(2)),
+    secondHalfLPM: parseFloat(secondHalfLPM.toFixed(2)),
+    effectiveDuration
+  }
+}
+
+function deriveProfileFromDimensions(dims) {
+  if (!dims) return { name: 'Unrated', description: 'Not enough data to rate this performance.', color: 'gray' }
+  const { lpm, consistencyScore, trajectoryRatio, peakCount, deadZoneCount, effectiveDuration } = dims
+  const deadZoneRate = effectiveDuration > 0 ? deadZoneCount / (effectiveDuration / 300) : 0
+
+  if (lpm >= 5 && consistencyScore >= 0.65 && trajectoryRatio >= 1.1)
+    return { name: 'Killing It', description: 'Strong, consistent engagement that builds to a great close. The room was with you the whole set.', color: 'green' }
+  if (lpm >= 4 && consistencyScore >= 0.55 && deadZoneRate <= 2)
+    return { name: 'Strong Set', description: 'Solid engagement with good consistency. A few spots to tighten but the material is landing.', color: 'green' }
+  if (lpm >= 3 && peakCount >= 2 && consistencyScore < 0.5)
+    return { name: 'Peaks and Valleys', description: "Big moments but inconsistent between bits. Study what's working between the peaks — the transitions may be the issue.", color: 'yellow' }
+  if (lpm >= 2.5 && trajectoryRatio < 0.7)
+    return { name: 'Front-Loaded', description: "Strong opening that loses momentum. The closer isn't landing — restructure the set order or strengthen the last two minutes.", color: 'yellow' }
+  if (lpm >= 2 && trajectoryRatio >= 1.5)
+    return { name: 'Slow Burn', description: 'The set builds significantly in the second half. The material works — focus on warming the room up faster with a stronger opener.', color: 'yellow' }
+  if (lpm >= 2 && consistencyScore >= 0.55 && peakCount === 0)
+    return { name: 'Polite Room', description: 'Consistent reactions but no big moments. The room is responding but not erupting — punch up the punchlines.', color: 'yellow' }
+  if (lpm >= 1.5 && deadZoneRate <= 2)
+    return { name: 'Finding Your Footing', description: 'Some moments landing but not consistently. Focus on tightening the setup-to-punchline ratio.', color: 'yellow' }
+  if (deadZoneRate >= 3)
+    return { name: 'Rough Night', description: 'Multiple extended dead zones throughout. Focus on the first two minutes — winning the room early changes everything.', color: 'red' }
+  return { name: 'Needs Work', description: 'Low engagement throughout. Sharpen the punchlines and tighten the setups before the next outing.', color: 'red' }
+}
+
+function PerformanceProfileCard({ result }) {
+  // Prefer backend-computed values; fall back to frontend computation for old analyses
+  const dims = result.performanceDimensions || computeDimensionsFromResult(result)
+  const profile = result.performanceProfile || deriveProfileFromDimensions(dims)
+
+  if (!dims) return null
+
+  const trajectoryLabel = dims.trajectoryRatio >= 1.2 ? 'Building ↑' : dims.trajectoryRatio <= 0.8 ? 'Fading ↓' : 'Steady →'
+  const trajectoryPct = Math.min(100, Math.max(0, ((dims.trajectoryRatio - 0.5) / 1.5) * 100))
+
+  const maxDeadZones = Math.max(dims.deadZoneCount, 8)
+
+  return (
+    <div className={`performance-profile-card profile-${profile.color}`}>
+      <div className="profile-header">
+        <div className="profile-name-block">
+          <span className="profile-label">Performance Profile</span>
+          <h2 className="profile-name">{profile.name}</h2>
+        </div>
+        <div className={`profile-dot profile-dot-${profile.color}`} />
+      </div>
+      <p className="profile-description">{profile.description}</p>
+
+      <div className="dimensions-grid">
+        <div className="dimension-item">
+          <div className="dimension-header">
+            <span className="dimension-label">Engagement</span>
+            <span className="dimension-value">{dims.lpm.toFixed(1)} LPM</span>
+          </div>
+          <div className="dimension-bar-track">
+            <div className="dimension-bar-fill" style={{ width: `${Math.min(100, (dims.lpm / 8) * 100)}%`, background: '#667eea' }} />
+          </div>
+        </div>
+
+        <div className="dimension-item">
+          <div className="dimension-header">
+            <span className="dimension-label">Consistency</span>
+            <span className="dimension-value">{Math.round(dims.consistencyScore * 100)}%</span>
+          </div>
+          <div className="dimension-bar-track">
+            <div className="dimension-bar-fill" style={{ width: `${dims.consistencyScore * 100}%`, background: '#48bb78' }} />
+          </div>
+        </div>
+
+        <div className="dimension-item">
+          <div className="dimension-header">
+            <span className="dimension-label">Trajectory</span>
+            <span className="dimension-value">{trajectoryLabel}</span>
+          </div>
+          <div className="dimension-bar-track">
+            <div className="dimension-bar-fill" style={{ width: `${trajectoryPct}%`, background: dims.trajectoryRatio >= 1 ? '#48bb78' : '#f6ad55' }} />
+          </div>
+        </div>
+
+        {dims.hitRate !== null && (
+          <div className="dimension-item">
+            <div className="dimension-header">
+              <span className="dimension-label">Hit Rate</span>
+              <span className="dimension-value">{dims.hitCount}/{dims.totalJokes} jokes landed</span>
+            </div>
+            <div className="dimension-bar-track">
+              <div className="dimension-bar-fill" style={{ width: `${dims.hitRate * 100}%`, background: '#667eea' }} />
+            </div>
+          </div>
+        )}
+
+        <div className="dimension-item">
+          <div className="dimension-header">
+            <span className="dimension-label">Peak Moments</span>
+            <span className="dimension-value">{dims.peakCount} big laugh{dims.peakCount !== 1 ? 's' : ''}</span>
+          </div>
+          <div className="dimension-bar-track">
+            <div className="dimension-bar-fill" style={{ width: `${Math.min(100, (dims.peakCount / 6) * 100)}%`, background: '#ed8936' }} />
+          </div>
+        </div>
+
+        <div className="dimension-item">
+          <div className="dimension-header">
+            <span className="dimension-label">Dead Zones</span>
+            <span className="dimension-value">{dims.deadZoneCount} silence window{dims.deadZoneCount !== 1 ? 's' : ''}</span>
+          </div>
+          <div className="dimension-bar-track">
+            <div className="dimension-bar-fill dimension-bar-negative" style={{ width: `${(dims.deadZoneCount / maxDeadZones) * 100}%`, background: dims.deadZoneCount > 3 ? '#fc8181' : '#f6ad55' }} />
+          </div>
+          <span className="dimension-note">Lower is better</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function Analysis() {
   const navigate = useNavigate()
   const [setName, setSetName] = useState('') // Text input for set name
@@ -701,23 +882,19 @@ function Analysis() {
               </button>
             </div>
 
+            <PerformanceProfileCard result={analysisResult} />
+
             <div className="results-summary">
               <div className="summary-card">
                 <h3>Set Name</h3>
                 <p>{analysisResult.setName}</p>
               </div>
               <div className="summary-card">
-                <h3>Category</h3>
-                <span className={`category-badge ${analysisResult.category}`}>
-                  {analysisResult.category}
-                </span>
-              </div>
-              <div className="summary-card">
                 <h3>Laughs per Minute</h3>
                 <p className="metric-value">{analysisResult.laughsPerMinute.toFixed(1)}</p>
               </div>
               <div className="summary-card">
-                <h3>Average Laughs per Joke</h3>
+                <h3>Avg per Joke</h3>
                 <p className="metric-value">{analysisResult.avgLaughsPerJoke.toFixed(1)}</p>
               </div>
             </div>

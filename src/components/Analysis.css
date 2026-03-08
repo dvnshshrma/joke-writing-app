@@ -456,6 +456,135 @@
   font-size: 1.8rem;
 }
 
+/* ── Performance Profile Card ─────────────────────────────────────────────── */
+
+.performance-profile-card {
+  border-radius: 16px;
+  padding: 2rem;
+  margin-bottom: 1.5rem;
+  border: 2px solid transparent;
+}
+
+.performance-profile-card.profile-green {
+  background: linear-gradient(135deg, #f0fff4 0%, #e6ffed 100%);
+  border-color: #68d391;
+}
+.performance-profile-card.profile-yellow {
+  background: linear-gradient(135deg, #fffff0 0%, #fefcbf 100%);
+  border-color: #f6e05e;
+}
+.performance-profile-card.profile-red {
+  background: linear-gradient(135deg, #fff5f5 0%, #fed7d7 100%);
+  border-color: #fc8181;
+}
+.performance-profile-card.profile-gray {
+  background: #f7f7f7;
+  border-color: #e0e0e0;
+}
+
+.profile-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.profile-name-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.profile-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #888;
+}
+
+.profile-name {
+  font-size: 2rem;
+  font-weight: 800;
+  margin: 0;
+  color: #1a202c;
+  line-height: 1.1;
+}
+
+.profile-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 0.25rem;
+}
+.profile-dot-green { background: #48bb78; }
+.profile-dot-yellow { background: #ecc94b; }
+.profile-dot-red { background: #fc8181; }
+.profile-dot-gray { background: #a0aec0; }
+
+.profile-description {
+  margin: 0 0 1.75rem 0;
+  color: #4a5568;
+  font-size: 1rem;
+  line-height: 1.6;
+  max-width: 680px;
+}
+
+.dimensions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem 2rem;
+}
+
+.dimension-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.dimension-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.dimension-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #718096;
+}
+
+.dimension-value {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #2d3748;
+}
+
+.dimension-bar-track {
+  height: 8px;
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.dimension-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.6s ease;
+  min-width: 2px;
+}
+
+.dimension-note {
+  font-size: 0.7rem;
+  color: #a0aec0;
+  text-align: right;
+}
+
+/* ── Results summary (below profile card) ─────────────────────────────────── */
+
 .results-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
