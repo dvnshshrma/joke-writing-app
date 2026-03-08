@@ -547,34 +547,40 @@ async function analyzeLaughterPatterns(transcript, setData, excludeStart = 0, ex
   const jokeDetails = extractedJokes.length > 0 ? extractedJokes : (setData?.joke_details || setData?.jokeDetails || []);
   const numJokes = jokeDetails.length || 5;
   
-  // Detect laugh events from silence gaps and sentiment
+  // Standard laugh detection threshold — aligned with api/index.js (Vercel)
+  const LAUGH_GAP_THRESHOLD_MS = 1200;
+
+  // Detect laugh events: silence gaps are the primary signal.
+  // Positive sentiment from AssemblyAI boosts intensity of an existing gap by +1
+  // but does NOT create independent events (prevents double-counting).
   const laughEvents = [];
-  
+
   for (let i = 1; i < words.length; i++) {
     const prevWord = words[i - 1];
     const currWord = words[i];
     const gap = currWord.start - prevWord.end;
-    
     const gapStart = prevWord.end / 1000;
-    if (gap > 1500 && gapStart >= excludeStart && gapStart <= (audioDuration - excludeEnd)) {
+
+    if (gap >= LAUGH_GAP_THRESHOLD_MS && gapStart >= excludeStart && gapStart <= (audioDuration - excludeEnd)) {
+      // Base intensity: 1 per second of silence, capped at 5
+      let intensity = Math.min(5, Math.floor(gap / 1000));
+
+      // +1 intensity boost if this gap falls within a high-confidence positive sentiment window
+      const inPositiveSentiment = sentimentResults.some(s =>
+        s.sentiment === 'POSITIVE' &&
+        s.confidence > 0.7 &&
+        (s.start / 1000) <= gapStart &&
+        (s.end / 1000) >= gapStart
+      );
+      if (inPositiveSentiment && intensity < 5) {
+        intensity = Math.min(5, intensity + 1);
+      }
+
       laughEvents.push({
         time: gapStart - excludeStart,
-        intensity: Math.min(5, Math.floor(gap / 1000)),
+        intensity,
         type: 'silence_gap'
       });
-    }
-  }
-  
-  for (const sentiment of sentimentResults) {
-    const time = sentiment.start / 1000;
-    if (time >= excludeStart && time <= (audioDuration - excludeEnd)) {
-      if (sentiment.sentiment === 'POSITIVE') {
-        laughEvents.push({
-          time: time - excludeStart,
-          intensity: sentiment.confidence > 0.8 ? 3 : 2,
-          type: 'positive_sentiment'
-        });
-      }
     }
   }
   
@@ -616,13 +622,17 @@ async function analyzeLaughterPatterns(transcript, setData, excludeStart = 0, ex
   const avgLaughsPerJoke = numJokes > 0 ? totalLaughs / numJokes : 0;
   const laughsPerMinute = effectiveDuration > 0 ? (totalLaughs / effectiveDuration) * 60 : 0;
   
+  // Category thresholds — aligned with api/index.js (Vercel).
+  // good: strong consistent engagement (LPM ≥ 6 AND avg ≥ 6)
+  // bad: little to no response (LPM < 2 AND avg < 2) — AND prevents penalising
+  //      sets where one metric is low due to a long intro or outro.
   let category = 'average';
-  if (laughsPerMinute >= 8 && avgLaughsPerJoke >= 8) {
+  if (laughsPerMinute >= 6 && avgLaughsPerJoke >= 6) {
     category = 'good';
-  } else if (laughsPerMinute < 4 || avgLaughsPerJoke < 4) {
+  } else if (laughsPerMinute < 2 && avgLaughsPerJoke < 2) {
     category = 'bad';
   }
-  
+
   return {
     laughsPerMinute: parseFloat(laughsPerMinute.toFixed(2)),
     avgLaughsPerJoke: parseFloat(avgLaughsPerJoke.toFixed(2)),
@@ -800,13 +810,14 @@ async function mockAnalyzeAudio(audioFilePath, setData, audioDurationSeconds = n
   const avgLaughsPerJoke = totalLaughs / numJokes;
   const laughsPerMinute = effectiveDuration > 0 ? (totalLaughs / effectiveDuration) * 60 : 0;
   
+  // Category thresholds — aligned with api/index.js (Vercel).
   let category = 'average';
-  if (laughsPerMinute >= 8 && avgLaughsPerJoke >= 8) {
+  if (laughsPerMinute >= 6 && avgLaughsPerJoke >= 6) {
     category = 'good';
-  } else if (laughsPerMinute < 4 || avgLaughsPerJoke < 4) {
+  } else if (laughsPerMinute < 2 && avgLaughsPerJoke < 2) {
     category = 'bad';
   }
-  
+
   return {
     laughsPerMinute: parseFloat(laughsPerMinute.toFixed(2)),
     avgLaughsPerJoke: parseFloat(avgLaughsPerJoke.toFixed(2)),

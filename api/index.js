@@ -81,9 +81,13 @@ const buildMockJokeMetrics = async ({ user, setName }) => {
   return { jokeMetrics, totalLaughs };
 };
 
+// Category thresholds — aligned with server/audioAnalyzer.js.
+// good: strong consistent engagement (LPM ≥ 6 AND avg ≥ 6)
+// bad: little to no response (LPM < 2 AND avg < 2) — AND prevents penalising
+//      sets where one metric is low due to a long intro or outro.
 const categorize = (lpm, avg) => {
-  if (lpm >= 8 && avg >= 8) return 'good';
-  if (lpm < 4 || avg < 4) return 'bad';
+  if (lpm >= 6 && avg >= 6) return 'good';
+  if (lpm < 2 && avg < 2) return 'bad';
   return 'average';
 };
 
@@ -106,14 +110,17 @@ const fetchAssemblyAI = async (path, opts = {}) => {
   return data;
 };
 
+// Standard laugh-gap threshold used across both Vercel (api/index.js) and Express
+// (server/audioAnalyzer.js). Change in both files if you need to recalibrate.
+const LAUGH_GAP_THRESHOLD_MS = 1200;
+
 const computeLaughTimelineFromWords = (words = [], effectiveDurationSeconds = 0, stepSeconds = 10) => {
   // Heuristic: treat long pauses as laugh moments.
   // This is not true "laughter detection", but gives a useful approximation without extra models.
   const buckets = new Array(Math.floor((effectiveDurationSeconds || 0) / stepSeconds) + 1).fill(0);
-  const gapThresholdMs = 1200;
   for (let i = 1; i < words.length; i++) {
     const gap = (words[i].start ?? 0) - (words[i - 1].end ?? 0);
-    if (gap >= gapThresholdMs) {
+    if (gap >= LAUGH_GAP_THRESHOLD_MS) {
       const t = Math.max(0, Math.floor((words[i - 1].end ?? 0) / 1000));
       const idx = Math.min(buckets.length - 1, Math.floor(t / stepSeconds));
       buckets[idx] += 1;
@@ -1576,7 +1583,9 @@ const analyzeComedyStyles = async (transcriptText) => {
     },
     {
       name: 'Clowning',
-      keywords: ['silly', 'ridiculous', 'absurd', 'goofy', 'funny', 'weird', 'strange', 'crazy', 'wacky', 'nuts'],
+      // Removed: 'ridiculous' (also in Opinionated), 'weird'/'strange' (also in Surrealism),
+      // 'funny' (too generic for comedy transcripts), 'crazy' (too broad)
+      keywords: ['silly', 'absurd', 'goofy', 'wacky', 'nuts', 'bonkers', 'buffoon', 'slapstick', 'zany', 'goofball'],
       weight: 1.0
     },
     {
@@ -1601,7 +1610,9 @@ const analyzeComedyStyles = async (transcriptText) => {
     },
     {
       name: 'Opinionated',
-      keywords: ['think', 'believe', 'opinion', 'should', 'wrong', 'right', 'stupid', 'dumb', 'ridiculous', 'hate', 'love'],
+      // Removed: 'love' (too common, belongs to Heartfelt), 'right' (too generic),
+      // 'ridiculous' (also in Clowning — original overlap)
+      keywords: ['think', 'believe', 'opinion', 'should', 'wrong', 'stupid', 'dumb', 'hate', 'disagree', 'unpopular opinion'],
       weight: 1.0
     },
     {
@@ -1621,7 +1632,10 @@ const analyzeComedyStyles = async (transcriptText) => {
     },
     {
       name: 'Sarcasm',
-      keywords: ['yeah right', 'sure', 'obviously', 'totally', 'great', 'wonderful', 'perfect', 'love that', 'sarcastic', 'ironic'],
+      // Removed: 'great', 'wonderful', 'perfect', 'sure', 'obviously', 'totally' — all far
+      // too common in normal speech and caused massive false positives across all transcripts.
+      // Kept and added only unambiguous sarcastic phrasing.
+      keywords: ['yeah right', 'as if', 'oh sure', 'love that', 'sarcastic', 'ironic', 'not like', 'oh how lovely', 'oh perfect', 'clearly not'],
       weight: 1.2
     },
     {
