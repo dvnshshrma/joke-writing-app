@@ -453,57 +453,59 @@ const segmentTranscriptIntoJokes = (words = [], transcriptText = '', chapters = 
   
   // Option 2: Use word timestamps to find natural breaks (long pauses)
   if (words.length > 0) {
-    const pauseThresholdMs = 1500; // 1.5 second pause indicates joke break
-    const breaks = [0]; // Start of first joke
-    
+    // Target joke count: at least minJokes, at most ~1 per minute + 1, hard cap 12
+    const targetJokes = Math.max(minJokes, Math.min(12, Math.ceil(estimatedMinutes) + 1));
+
+    // Collect ALL pause positions above a loose threshold (1200ms) so we have candidates
+    const pauseThresholdMs = 1200;
+    const candidateBreaks = [];
     for (let i = 1; i < words.length; i++) {
       const gap = (words[i].start ?? 0) - (words[i - 1].end ?? 0);
       if (gap >= pauseThresholdMs) {
-        breaks.push(i);
+        candidateBreaks.push({ wordIdx: i, gap });
       }
     }
-    breaks.push(words.length); // End of last joke
-    
-    // Ensure minimum number of jokes
-    const targetJokes = Math.max(minJokes, Math.min(12, Math.ceil(estimatedMinutes) + 1));
-    
-    if (breaks.length - 1 >= minJokes) {
-      // Use natural breaks
-      for (let i = 0; i < breaks.length - 1; i++) {
-        const startIdx = breaks[i];
-        const endIdx = breaks[i + 1];
+
+    // Select boundary points: if we have more candidates than we need, keep only the
+    // (targetJokes - 1) largest gaps — these are the most likely actual joke transitions.
+    // This prevents short within-joke pauses from creating micro-segments.
+    const neededBreaks = targetJokes - 1;
+    const selectedBreaks = candidateBreaks
+      .sort((a, b) => b.gap - a.gap)        // largest gaps first
+      .slice(0, neededBreaks)               // keep only as many as we need
+      .sort((a, b) => a.wordIdx - b.wordIdx) // restore chronological order
+      .map(b => b.wordIdx);
+
+    const breakIndices = [0, ...selectedBreaks, words.length];
+
+    if (selectedBreaks.length >= minJokes - 1) {
+      // Build segments from the selected breaks
+      for (let i = 0; i < breakIndices.length - 1; i++) {
+        const startIdx = breakIndices[i];
+        const endIdx = breakIndices[i + 1];
         const segmentWords = words.slice(startIdx, endIdx);
-        const startTime = segmentWords[0]?.start ? segmentWords[0].start / 1000 : null;
-        const endTime = segmentWords[segmentWords.length - 1]?.end ? segmentWords[segmentWords.length - 1].end / 1000 : null;
+        if (segmentWords.length < 5) continue; // skip near-empty segments
+        const startTime = segmentWords[0]?.start != null ? segmentWords[0].start / 1000 : null;
+        const endTime = segmentWords[segmentWords.length - 1]?.end != null
+          ? segmentWords[segmentWords.length - 1].end / 1000 : null;
         const text = segmentWords.map(w => w.text || w.word || '').join(' ');
-        
-        segments.push({
-          index: i,
-          startTime,
-          endTime,
-          text: text.trim()
-        });
+        segments.push({ index: segments.length, startTime, endTime, text: text.trim() });
       }
     } else {
-      // Not enough natural breaks, split evenly
+      // Not enough natural breaks — split evenly by word count
       const wordsPerSegment = Math.floor(words.length / targetJokes);
       for (let i = 0; i < targetJokes; i++) {
         const startIdx = i * wordsPerSegment;
         const endIdx = i === targetJokes - 1 ? words.length : (i + 1) * wordsPerSegment;
         const segmentWords = words.slice(startIdx, endIdx);
-        const startTime = segmentWords[0]?.start ? segmentWords[0].start / 1000 : null;
-        const endTime = segmentWords[segmentWords.length - 1]?.end ? segmentWords[segmentWords.length - 1].end / 1000 : null;
+        const startTime = segmentWords[0]?.start != null ? segmentWords[0].start / 1000 : null;
+        const endTime = segmentWords[segmentWords.length - 1]?.end != null
+          ? segmentWords[segmentWords.length - 1].end / 1000 : null;
         const text = segmentWords.map(w => w.text || w.word || '').join(' ');
-        
-        segments.push({
-          index: i,
-          startTime,
-          endTime,
-          text: text.trim()
-        });
+        segments.push({ index: i, startTime, endTime, text: text.trim() });
       }
     }
-    
+
     return segments;
   }
   
