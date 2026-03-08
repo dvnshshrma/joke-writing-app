@@ -2,6 +2,56 @@ import { useState, useEffect } from 'react'
 import { jokesAPI } from '../services/api'
 import './OldJokesList.css'
 
+const VENUE_LABELS = {
+  open_mic: 'Open Mic', comedy_club: 'Club', show: 'Show', corporate: 'Corporate', other: 'Other',
+}
+
+function JokePerformanceHistory({ jokeId }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    jokesAPI.getPerformance(jokeId).then(d => { setData(d); setLoading(false) }).catch(() => setLoading(false))
+  }, [jokeId])
+
+  if (loading) return <div className="perf-history-loading">Loading history...</div>
+  if (!data || data.appearances.length === 0) {
+    return <div className="perf-history-empty">No performance data yet. Add this joke to a set and analyze it.</div>
+  }
+
+  const { appearances, summary } = data
+  const trendEmoji = summary?.trend > 0 ? '📈' : summary?.trend < 0 ? '📉' : '➡️'
+
+  return (
+    <div className="perf-history">
+      <div className="perf-history-summary">
+        {summary?.avgLaughs !== null && (
+          <div className="perf-stat"><span className="perf-stat-value">{summary.avgLaughs}</span><span className="perf-stat-label">avg laughs</span></div>
+        )}
+        {summary?.bestLaughs !== null && (
+          <div className="perf-stat"><span className="perf-stat-value">{summary.bestLaughs}</span><span className="perf-stat-label">best show</span></div>
+        )}
+        <div className="perf-stat"><span className="perf-stat-value">{summary?.totalShows}</span><span className="perf-stat-label">shows</span></div>
+        {summary?.trend !== 0 && (
+          <div className="perf-stat"><span className="perf-stat-value">{trendEmoji} {Math.abs(summary.trend)}</span><span className="perf-stat-label">trend</span></div>
+        )}
+      </div>
+      <div className="perf-history-rows">
+        {appearances.map((a, i) => (
+          <div key={a.analysisId || i} className="perf-row">
+            <span className="perf-row-date">{new Date(a.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}</span>
+            <span className="perf-row-set">{a.setName}</span>
+            {a.venueType && <span className={`venue-badge venue-${a.venueType}`}>{VENUE_LABELS[a.venueType]}</span>}
+            <span className={`perf-row-laughs${a.jokeLaughs === null ? ' unknown' : ''}`}>
+              {a.jokeLaughs !== null ? `${a.jokeLaughs} laughs` : '—'}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function OldJokesList({ onBack, onEdit }) {
   const [jokes, setJokes] = useState([])
   const [selectedJoke, setSelectedJoke] = useState(null)
@@ -196,6 +246,11 @@ function OldJokesList({ onBack, onEdit }) {
                   <p className="joke-text-detail punchline-text">{selectedJoke.punchline}</p>
                 </div>
               )}
+            </div>
+
+            <div className="perf-history-section">
+              <h3 className="perf-history-title">Performance History</h3>
+              <JokePerformanceHistory jokeId={selectedJoke.id} />
             </div>
 
             <div className="joke-detail-footer">

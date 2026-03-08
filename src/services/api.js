@@ -111,5 +111,17 @@ export const jokesAPI = {
       throw error;
     }
   },
+
+  async getPerformance(id) {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE_URL}/jokes/${id}/performance`, { headers });
+      if (!response.ok) return { appearances: [], summary: null };
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching joke performance:', error);
+      return { appearances: [], summary: null };
+    }
+  },
 };
 

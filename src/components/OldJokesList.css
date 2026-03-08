@@ -166,6 +166,94 @@
   color: #999;
 }
 
+/* ─── Performance history panel ──────────────────────────────────────────── */
+.perf-history-section {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 2px solid #f0f0f0;
+}
+
+.perf-history-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #333;
+  margin: 0 0 0.75rem;
+}
+
+.perf-history-loading,
+.perf-history-empty {
+  font-size: 0.85rem;
+  color: #999;
+  font-style: italic;
+}
+
+.perf-history-summary {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.perf-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: #f8f9ff;
+  border: 1px solid #e0e4ff;
+  border-radius: 10px;
+  padding: 0.4rem 0.8rem;
+  min-width: 60px;
+}
+
+.perf-stat-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #667eea;
+}
+
+.perf-stat-label {
+  font-size: 0.7rem;
+  color: #888;
+}
+
+.perf-history-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.perf-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid #f5f5f5;
+  flex-wrap: wrap;
+}
+
+.perf-row-date {
+  color: #999;
+  min-width: 70px;
+}
+
+.perf-row-set {
+  flex: 1;
+  color: #444;
+  font-weight: 500;
+  min-width: 80px;
+}
+
+.perf-row-laughs {
+  font-weight: 700;
+  color: #2e7d32;
+}
+
+.perf-row-laughs.unknown {
+  color: #bbb;
+  font-weight: 400;
+}
+
 .joke-preview {
   margin: 0;
   color: #666;

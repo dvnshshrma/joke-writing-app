@@ -982,6 +982,75 @@ export default async function handler(req, res) {
       }
     }
 
+    // Joke performance history endpoint
+    const jokePerformanceMatch = path.match(/^\/jokes\/([^/]+)\/performance$/);
+    if (jokePerformanceMatch && method === 'GET') {
+      const jokeId = jokePerformanceMatch[1];
+      const { data: sets, error: setsErr } = await supabaseAdmin
+        .from('sets')
+        .select('id, header, jokes, joke_details')
+        .filter('jokes', 'cs', JSON.stringify([jokeId]));
+      if (setsErr) throw setsErr;
+
+      if (!sets || sets.length === 0) {
+        return res.json({ appearances: [], summary: null });
+      }
+
+      const setIds = sets.map(s => s.id);
+      const { data: analyses, error: analysesErr } = await supabaseAdmin
+        .from('analysis_results')
+        .select('id, set_id, set_name, venue_type, laughs_per_minute, category, performance_profile, joke_metrics, created_at')
+        .in('set_id', setIds)
+        .order('created_at', { ascending: true });
+      if (analysesErr) throw analysesErr;
+
+      const { data: jokeData } = await supabaseAdmin.from('jokes').select('header').eq('id', jokeId).single();
+      const jokeHeader = (jokeData?.header || '').toLowerCase().trim();
+
+      const appearances = (analyses || []).map(a => {
+        const set = sets.find(s => s.id === a.set_id);
+        const setJokes = set?.jokes || [];
+        const position = setJokes.indexOf(jokeId) + 1;
+
+        const metrics = a.joke_metrics || [];
+        let matchedMetric = null;
+        if (jokeHeader) {
+          matchedMetric = metrics.find(m => {
+            const mHeader = (m.header || '').toLowerCase().trim();
+            return mHeader === jokeHeader || mHeader.includes(jokeHeader) || jokeHeader.includes(mHeader);
+          });
+        }
+        if (!matchedMetric && position > 0 && metrics[position - 1]) {
+          matchedMetric = metrics[position - 1];
+        }
+
+        return {
+          analysisId: a.id,
+          setName: a.set_name,
+          venueType: a.venue_type || null,
+          lpm: a.laughs_per_minute,
+          category: a.category,
+          performanceProfile: a.performance_profile,
+          date: a.created_at,
+          position,
+          jokeLaughs: matchedMetric?.laughs ?? null,
+          jokeMatchedHeader: matchedMetric?.header || null,
+        };
+      });
+
+      const withLaughs = appearances.filter(a => a.jokeLaughs !== null);
+      const summary = withLaughs.length > 0 ? {
+        totalShows: appearances.length,
+        avgLaughs: parseFloat((withLaughs.reduce((s, a) => s + a.jokeLaughs, 0) / withLaughs.length).toFixed(1)),
+        bestLaughs: Math.max(...withLaughs.map(a => a.jokeLaughs)),
+        trend: withLaughs.length >= 2
+          ? withLaughs[withLaughs.length - 1].jokeLaughs - withLaughs[0].jokeLaughs
+          : 0,
+      } : { totalShows: appearances.length, avgLaughs: null, bestLaughs: null, trend: 0 };
+
+      return res.json({ appearances, summary });
+    }
+
     // Single joke endpoints
     const jokeMatch = path.match(/^\/jokes\/([^/]+)$/);
     if (jokeMatch) {
