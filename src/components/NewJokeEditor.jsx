@@ -47,6 +47,7 @@ function NewJokeEditor({ joke, onBack, onSave }) {
   const [header, setHeader] = useState(joke?.header || '')
   const [sections, setSections] = useState(initialSections)
   const [isDraft, setIsDraft] = useState(joke?.isDraft !== undefined ? joke.isDraft : true)
+  const [lifecycle, setLifecycle] = useState(joke?.lifecycle || 'new')
   const [comments, setComments] = useState(joke?.comments || {})
   const [activeCommentLine, setActiveCommentLine] = useState(null)
   const [strikethroughTexts, setStrikethroughTexts] = useState(joke?.strikethroughTexts || [])
@@ -74,6 +75,7 @@ function NewJokeEditor({ joke, onBack, onSave }) {
         header,
         sections,
         isDraft,
+        lifecycle,
         comments,
         strikethroughTexts,
         replacements,
@@ -332,18 +334,37 @@ function NewJokeEditor({ joke, onBack, onSave }) {
 
       <div className="editor-footer">
         <div className="save-options">
-          <button 
+          <button
             className={`save-btn ${isDraft ? 'active' : ''}`}
             onClick={() => setIsDraft(true)}
           >
             Save as Draft
           </button>
-          <button 
+          <button
             className={`save-btn ${!isDraft ? 'active finalise' : ''}`}
             onClick={() => setIsDraft(false)}
           >
             Finalise the Joke
           </button>
+        </div>
+        <div className="lifecycle-selector">
+          <span className="lifecycle-label">Material stage</span>
+          {[
+            { value: 'new',     label: 'New',     emoji: '✨' },
+            { value: 'testing', label: 'Testing', emoji: '🧪' },
+            { value: 'proven',  label: 'Proven',  emoji: '✅' },
+            { value: 'retired', label: 'Retired', emoji: '📦' },
+          ].map(opt => (
+            <button
+              key={opt.value}
+              type="button"
+              className={`lifecycle-btn lifecycle-${opt.value}${lifecycle === opt.value ? ' active' : ''}`}
+              onClick={() => setLifecycle(opt.value)}
+              title={opt.label}
+            >
+              {opt.emoji} {opt.label}
+            </button>
+          ))}
         </div>
         <button className="save-action-btn" onClick={handleSave}>
           {isDraft ? '💾 Save Draft' : '✅ Finalise & Save'}

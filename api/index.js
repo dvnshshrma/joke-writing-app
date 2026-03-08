@@ -948,6 +948,7 @@ export default async function handler(req, res) {
       sections: joke.sections || [],
       isDraft: joke.is_draft !== false,
           isOneLiner: joke.is_one_liner || false,
+      lifecycle: joke.lifecycle || 'new',
       comments: joke.comments || {},
       strikethroughTexts: joke.strikethrough_texts || [],
       replacements: joke.replacements || {},
@@ -958,13 +959,16 @@ export default async function handler(req, res) {
       }
       
       if (method === 'POST') {
-        const { id, header, sections, isDraft, comments, strikethroughTexts, replacements, isOneLiner } = body;
+        const { id, header, sections, isDraft, lifecycle, comments, strikethroughTexts, replacements, isOneLiner } = body;
+        const VALID_LIFECYCLE = ['new', 'testing', 'proven', 'retired'];
+        const safeLifecycle = VALID_LIFECYCLE.includes(lifecycle) ? lifecycle : 'new';
     const jokeDoc = {
       id,
       header: header || '',
       sections: sections || [],
       is_draft: isDraft !== false,
           is_one_liner: isOneLiner || false,
+          lifecycle: safeLifecycle,
       comments: comments || {},
       strikethrough_texts: strikethroughTexts || [],
       replacements: replacements || {},
@@ -995,6 +999,7 @@ export default async function handler(req, res) {
       sections: data.sections || [],
       isDraft: data.is_draft !== false,
           isOneLiner: data.is_one_liner || false,
+          lifecycle: data.lifecycle || 'new',
       comments: data.comments || {},
       strikethroughTexts: data.strikethrough_texts || [],
       replacements: data.replacements || {},
@@ -1004,12 +1009,15 @@ export default async function handler(req, res) {
       }
       
       if (method === 'PUT') {
-        const { header, sections, isDraft, comments, strikethroughTexts, replacements, isOneLiner } = body;
+        const { header, sections, isDraft, lifecycle, comments, strikethroughTexts, replacements, isOneLiner } = body;
+        const VALID_LIFECYCLE = ['new', 'testing', 'proven', 'retired'];
+        const safeLifecycle = VALID_LIFECYCLE.includes(lifecycle) ? lifecycle : undefined;
         const { error } = await supabaseAdmin.from('jokes').update({
       header: header || '',
       sections: sections || [],
       is_draft: isDraft !== false,
           is_one_liner: isOneLiner || false,
+          ...(safeLifecycle ? { lifecycle: safeLifecycle } : {}),
       comments: comments || {},
       strikethrough_texts: strikethroughTexts || [],
       replacements: replacements || {},

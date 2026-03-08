@@ -106,6 +106,11 @@ function OldJokesList({ onBack, onEdit }) {
                 <span className={`status-badge ${joke.isDraft ? 'draft' : 'final'}`}>
                   {joke.isDraft ? 'Draft' : 'Final'}
                 </span>
+                {joke.lifecycle && joke.lifecycle !== 'new' && (
+                  <span className={`lifecycle-badge lifecycle-${joke.lifecycle}`}>
+                    {{ testing: '🧪 Testing', proven: '✅ Proven', retired: '📦 Retired' }[joke.lifecycle] || joke.lifecycle}
+                  </span>
+                )}
                 <span className="joke-date">{formatDate(joke.updatedAt)}</span>
               </div>
               <p className="joke-preview">
@@ -119,9 +124,16 @@ function OldJokesList({ onBack, onEdit }) {
           <div className="joke-detail">
             <div className="joke-detail-header">
               <h2>{selectedJoke.header || 'Untitled Joke'}</h2>
-              <span className={`status-badge ${selectedJoke.isDraft ? 'draft' : 'final'}`}>
-                {selectedJoke.isDraft ? 'Draft' : 'Final'}
-              </span>
+              <div className="joke-detail-badges">
+                <span className={`status-badge ${selectedJoke.isDraft ? 'draft' : 'final'}`}>
+                  {selectedJoke.isDraft ? 'Draft' : 'Final'}
+                </span>
+                {selectedJoke.lifecycle && (
+                  <span className={`lifecycle-badge lifecycle-${selectedJoke.lifecycle}`}>
+                    {{ new: '✨ New', testing: '🧪 Testing', proven: '✅ Proven', retired: '📦 Retired' }[selectedJoke.lifecycle] || selectedJoke.lifecycle}
+                  </span>
+                )}
+              </div>
             </div>
             
             <div className="joke-detail-body">

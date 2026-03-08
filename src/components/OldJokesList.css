@@ -141,6 +141,26 @@
   color: #155724;
 }
 
+/* ─── Lifecycle badge ─────────────────────────────────────────────────────── */
+.lifecycle-badge {
+  padding: 0.2rem 0.6rem;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.lifecycle-badge.lifecycle-new     { background: #e8f4fd; color: #1a7abf; }
+.lifecycle-badge.lifecycle-testing { background: #fff8e1; color: #92400e; }
+.lifecycle-badge.lifecycle-proven  { background: #e8f5e9; color: #2e7d32; }
+.lifecycle-badge.lifecycle-retired { background: #f5f5f5; color: #757575; }
+
+.joke-detail-badges {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 .joke-date {
   font-size: 0.8rem;
   color: #999;
