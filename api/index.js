@@ -1134,6 +1134,7 @@ export default async function handler(req, res) {
           id: a.id,
           setId: a.set_id,
           setName: a.set_name,
+          venueType: a.venue_type || null,
           audioFileName: a.audio_file_name,
           laughsPerMinute: a.laughs_per_minute,
           avgLaughsPerJoke: a.avg_laughs_per_joke,
@@ -1162,6 +1163,7 @@ export default async function handler(req, res) {
     const {
           setId,
           setName,
+          venueType = 'open_mic',
           audioDuration,
           excludeStartSeconds = 0,
           excludeEndSeconds = 0,
@@ -1169,6 +1171,9 @@ export default async function handler(req, res) {
           storageBucket = null,
           storagePath = null
         } = body || {};
+
+        const VALID_VENUE_TYPES = ['open_mic', 'comedy_club', 'show', 'corporate', 'other'];
+        const safeVenueType = VALID_VENUE_TYPES.includes(venueType) ? venueType : 'open_mic';
 
         if (!setId) return res.status(400).json({ error: 'setId is required' });
         if (!setName) return res.status(400).json({ error: 'setName is required' });
@@ -1203,6 +1208,7 @@ export default async function handler(req, res) {
             jobId: job.id,
             setId,
             setName,
+            venueType: safeVenueType,
             excludedStart,
             excludedEnd,
             effectiveDuration,
@@ -1228,6 +1234,7 @@ export default async function handler(req, res) {
           id: analysisId,
           set_id: setId,
           set_name: setName,
+          venue_type: safeVenueType,
           audio_file_name: audioFileName,
           laughs_per_minute: Number(laughsPerMinute.toFixed(2)),
           avg_laughs_per_joke: Number(avgLaughsPerJoke.toFixed(2)),
@@ -1245,6 +1252,7 @@ export default async function handler(req, res) {
         return res.json({
           id: analysisId,
           setName,
+          venueType: safeVenueType,
           laughsPerMinute: analysisDoc.laughs_per_minute,
           avgLaughsPerJoke: analysisDoc.avg_laughs_per_joke,
           category,
@@ -1272,6 +1280,9 @@ export default async function handler(req, res) {
 
         const setId = req.query?.setId || null;
         const setName = req.query?.setName || null;
+        const VALID_VENUE_TYPES = ['open_mic', 'comedy_club', 'show', 'corporate', 'other'];
+        const rawVenueType = req.query?.venueType || 'open_mic';
+        const safeVenueType = VALID_VENUE_TYPES.includes(rawVenueType) ? rawVenueType : 'open_mic';
         const audioDuration = req.query?.audioDuration ? parseInt(req.query.audioDuration, 10) : null;
         const excludeStartSeconds = req.query?.excludeStartSeconds ? parseInt(req.query.excludeStartSeconds, 10) : 0;
         const excludeEndSeconds = req.query?.excludeEndSeconds ? parseInt(req.query.excludeEndSeconds, 10) : 0;
@@ -1292,6 +1303,7 @@ export default async function handler(req, res) {
           return res.json({
             id: a.id,
             setName: a.set_name,
+            venueType: a.venue_type || null,
             laughsPerMinute: a.laughs_per_minute,
             avgLaughsPerJoke: a.avg_laughs_per_joke,
             category: a.category,
@@ -1400,6 +1412,7 @@ export default async function handler(req, res) {
           id: jobId,
           set_id: setId || `${Date.now()}`,
           set_name: setName || 'Untitled Set',
+          venue_type: safeVenueType,
           audio_file_name: audioFileName,
           laughs_per_minute: Number(laughsPerMinute.toFixed(2)),
           avg_laughs_per_joke: Number(avgLaughsPerJoke.toFixed(2)),
@@ -1429,9 +1442,9 @@ export default async function handler(req, res) {
         }]);
         if (insertErr1) {
           const msg = insertErr1.message || insertErr1.details || '';
-          if (msg.includes('transcript_text') || msg.includes('topic_summaries') || msg.includes('performance_') || msg.includes('schema cache')) {
+          if (msg.includes('transcript_text') || msg.includes('topic_summaries') || msg.includes('performance_') || msg.includes('venue_type') || msg.includes('schema cache')) {
             // Strip columns that may not exist yet in older DB schemas
-            const { topic_summaries: _ts, performance_profile: _pp, performance_dimensions: _pd, ...fallbackDoc } = analysisDoc;
+            const { topic_summaries: _ts, performance_profile: _pp, performance_dimensions: _pd, venue_type: _vt, ...fallbackDoc } = analysisDoc;
             const { error: insertErr2 } = await supabaseAdmin.from('analysis_results').insert([fallbackDoc]);
             if (insertErr2) throw insertErr2;
           } else {
@@ -1443,6 +1456,7 @@ export default async function handler(req, res) {
           status: 'completed',
           id: jobId,
           setName: analysisDoc.set_name,
+          venueType: safeVenueType,
           laughsPerMinute: analysisDoc.laughs_per_minute,
           avgLaughsPerJoke: analysisDoc.avg_laughs_per_joke,
           category,
@@ -1479,6 +1493,7 @@ export default async function handler(req, res) {
       id: data.id,
       setId: data.set_id,
       setName: data.set_name,
+      venueType: data.venue_type || null,
       audioFileName: data.audio_file_name,
           laughsPerMinute: data.laughs_per_minute,
           avgLaughsPerJoke: data.avg_laughs_per_joke,

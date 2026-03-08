@@ -6,6 +6,14 @@ import { setsAPI } from '../services/setsAPI'
 import { analysisAPI } from '../services/analysisAPI'
 import './Analysis.css'
 
+const VENUE_LABELS = {
+  open_mic: 'Open Mic',
+  comedy_club: 'Comedy Club',
+  show: 'Show / Festival',
+  corporate: 'Corporate',
+  other: 'Other',
+}
+
 // ─── Performance profile helpers (frontend) ──────────────────────────────────
 // Used as a fallback for older saved analyses that pre-date the backend computation.
 // New analyses receive performanceDimensions + performanceProfile directly from the API.
@@ -190,6 +198,7 @@ function PerformanceProfileCard({ result }) {
 function Analysis() {
   const navigate = useNavigate()
   const [setName, setSetName] = useState('') // Text input for set name
+  const [venueType, setVenueType] = useState('open_mic') // Room type for context
   const [audioFile, setAudioFile] = useState(null)
   const [audioDuration, setAudioDuration] = useState(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
@@ -274,6 +283,7 @@ function Analysis() {
   const handleReAnalyze = (oldAnalysis) => {
     // Pre-fill the setName with the old analysis's setName
     setSetName(oldAnalysis.setName || '')
+    setVenueType(oldAnalysis.venueType || 'open_mic')
     // Switch to new analysis tab
     setActiveTab('new')
     // Clear any existing analysis result
@@ -492,6 +502,7 @@ function Analysis() {
       const formData = new FormData()
       formData.append('audio', audioFile)
       formData.append('setName', setName.trim())
+      formData.append('venueType', venueType)
       formData.append('useTranscript', 'true') // Flag to use transcript-based analysis
       if (audioDuration) {
         formData.append('audioDuration', audioDuration.toString())
@@ -511,6 +522,7 @@ function Analysis() {
         const meta = {
           setId: result.setId || '',
           setName: result.setName || setName.trim(),
+          venueType: result.venueType || venueType,
           audioDuration: audioDuration || '',
           excludeStartSeconds: excludeStart || 0,
           excludeEndSeconds: excludeEnd || 0,
@@ -698,6 +710,27 @@ function Analysis() {
                 value={setName}
                 onChange={(e) => setSetName(e.target.value)}
               />
+              <div className="venue-type-row">
+                <label className="venue-type-label">Room type</label>
+                <div className="venue-type-options">
+                  {[
+                    { value: 'open_mic', label: 'Open Mic' },
+                    { value: 'comedy_club', label: 'Comedy Club' },
+                    { value: 'show', label: 'Show / Festival' },
+                    { value: 'corporate', label: 'Corporate' },
+                    { value: 'other', label: 'Other' },
+                  ].map(opt => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      className={`venue-btn${venueType === opt.value ? ' active' : ''}`}
+                      onClick={() => setVenueType(opt.value)}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
 
             <div className="audio-upload-section">
@@ -888,6 +921,11 @@ function Analysis() {
               <div className="summary-card">
                 <h3>Set Name</h3>
                 <p>{analysisResult.setName}</p>
+                {analysisResult.venueType && (
+                  <span className={`venue-badge venue-${analysisResult.venueType}`}>
+                    {VENUE_LABELS[analysisResult.venueType] || analysisResult.venueType}
+                  </span>
+                )}
               </div>
               <div className="summary-card">
                 <h3>Laughs per Minute</h3>
@@ -1745,7 +1783,14 @@ function PerformanceTrends({ trendData, formatDate }) {
                 <div className="history-rank">{allAnalyses.length - i}</div>
                 <div className="history-info">
                   <h4>{a.setName || 'Untitled Set'}</h4>
-                  <span className="history-date">{formatDate(a.createdAt)}</span>
+                  <div className="history-meta">
+                    <span className="history-date">{formatDate(a.createdAt)}</span>
+                    {a.venueType && (
+                      <span className={`venue-badge venue-${a.venueType}`}>
+                        {VENUE_LABELS[a.venueType] || a.venueType}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="history-metrics">
                   <span className="history-lpm">{a.laughsPerMinute.toFixed(1)} LPM</span>
