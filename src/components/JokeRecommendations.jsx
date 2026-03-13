@@ -11,6 +11,7 @@ function JokeRecommendations() {
   const [jokes, setJokes] = useState([])
   const [analyses, setAnalyses] = useState([])
   const [recommendations, setRecommendations] = useState(null)
+  const [jokeHealth, setJokeHealth] = useState([])
   const [activeSection, setActiveSection] = useState('overview')
 
   useEffect(() => {
@@ -26,15 +27,95 @@ function JokeRecommendations() {
       
       setJokes(jokesData.filter(j => !j.isOneLiner))
       setAnalyses(analysesData)
-      
+
       // Generate recommendations
       const recs = generateRecommendations(jokesData.filter(j => !j.isOneLiner), analysesData)
       setRecommendations(recs)
+
+      // Compute joke health scores
+      const health = computeJokeHealth(analysesData)
+      setJokeHealth(health)
     } catch (error) {
       console.error('Error loading data:', error)
     } finally {
       setLoading(false)
     }
+  }
+
+  const computeJokeHealth = (analyses) => {
+    // Aggregate joke appearances across analyses
+    const jokeMap = new Map()
+
+    for (const analysis of analyses) {
+      if (!Array.isArray(analysis.jokeMetrics)) continue
+      for (const m of analysis.jokeMetrics) {
+        const key = (m.header || '').toLowerCase().trim()
+        if (!key) continue
+        if (!jokeMap.has(key)) {
+          jokeMap.set(key, { header: m.header, laughsList: [], dates: [] })
+        }
+        const entry = jokeMap.get(key)
+        entry.laughsList.push(m.laughs || 0)
+        entry.dates.push(analysis.createdAt)
+      }
+    }
+
+    const results = []
+
+    for (const [, { header, laughsList, dates }] of jokeMap) {
+      if (laughsList.length < 2) continue
+
+      const count = laughsList.length
+      const avgLaughs = laughsList.reduce((s, v) => s + v, 0) / count
+
+      // Sort by date for trend
+      const sorted = laughsList
+        .map((laughs, i) => ({ laughs, date: dates[i] }))
+        .sort((a, b) => new Date(a.date) - new Date(b.date))
+        .map((x) => x.laughs)
+
+      // trendDirection: +1 improving, -1 declining, 0 flat → score 20/10/0
+      const first = sorted[0]
+      const last = sorted[sorted.length - 1]
+      const trendScore = last > first ? 20 : last < first ? 0 : 10
+
+      // consistency: stdev
+      const mean = avgLaughs
+      const variance =
+        laughsList.reduce((s, v) => s + (v - mean) ** 2, 0) / laughsList.length
+      const stdev = Math.sqrt(variance)
+      const consistencyScore = stdev < 2 ? 20 : stdev < 4 ? 10 : 0
+
+      // hitRate: % shows with laughs > 0
+      const hitsWithLaughs = laughsList.filter((v) => v > 0).length
+      const hitRate = hitsWithLaughs / count
+      const hitRateScore = hitRate * 20
+
+      // avgLaughs component: normalize to 0-10 scale (10 laughs = max)
+      const avgLaughsNorm = Math.min(avgLaughs / 10, 1)
+      const avgLaughsScore = avgLaughsNorm * 40
+
+      const rawScore = avgLaughsScore + trendScore + consistencyScore + hitRateScore
+      const score = Math.min(100, Math.max(0, Math.round(rawScore)))
+
+      // Lifecycle suggestion
+      let suggestion = null
+      if (score > 70 && count >= 3) {
+        suggestion = 'Consider marking as Proven'
+      } else if (score < 30 && count >= 3) {
+        suggestion = 'Consider retiring or rewriting'
+      }
+
+      results.push({
+        header,
+        score,
+        count,
+        avgLaughs,
+        suggestion,
+      })
+    }
+
+    return results.sort((a, b) => b.score - a.score)
   }
 
   const generateRecommendations = (jokes, analyses) => {
@@ -265,11 +346,17 @@ function JokeRecommendations() {
         >
           🎲 Untested
         </button>
-        <button 
+        <button
           className={activeSection === 'sets' ? 'active' : ''}
           onClick={() => setActiveSection('sets')}
         >
           🎤 Set Builder
+        </button>
+        <button
+          className={activeSection === 'health' ? 'active' : ''}
+          onClick={() => setActiveSection('health')}
+        >
+          💪 Joke Health
         </button>
       </div>
 
@@ -493,6 +580,53 @@ function JokeRecommendations() {
                 <li><strong>Similar topics:</strong> Group related jokes together for better flow</li>
               </ul>
             </div>
+          </div>
+        )}
+        {activeSection === 'health' && (
+          <div className="health-section">
+            <h2>💪 Joke Health Scores</h2>
+            <p className="section-desc">
+              Composite health score (0–100) for jokes with 2+ performance data points.
+              Factors: avg laughs, trend, consistency, hit rate.
+            </p>
+
+            {jokeHealth.length === 0 ? (
+              <div className="no-data-message">
+                Not enough data yet. Each joke needs at least 2 performances to get a health score.
+              </div>
+            ) : (
+              <div className="health-list">
+                {jokeHealth.map((joke, i) => {
+                  const colorClass =
+                    joke.score >= 70 ? 'green' : joke.score >= 40 ? 'yellow' : 'red'
+                  return (
+                    <div key={i} className="health-card">
+                      <div className="health-card-top">
+                        <span className="health-header">{joke.header}</span>
+                        <span className={`health-score-badge ${colorClass}`}>
+                          {joke.score}
+                        </span>
+                      </div>
+                      <div className="health-bar-wrap">
+                        <div
+                          className={`health-bar ${colorClass}`}
+                          style={{ width: `${joke.score}%` }}
+                        />
+                      </div>
+                      <div className="health-meta">
+                        <span>{joke.avgLaughs.toFixed(1)} avg laughs</span>
+                        <span>{joke.count} shows</span>
+                      </div>
+                      {joke.suggestion && (
+                        <div className={`health-suggestion ${colorClass}`}>
+                          {joke.suggestion}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>

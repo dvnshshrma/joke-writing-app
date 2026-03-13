@@ -9,10 +9,23 @@ const VENUE_LABELS = {
 function JokePerformanceHistory({ jokeId }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [suggestions, setSuggestions] = useState(null)
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false)
 
   useEffect(() => {
+    setSuggestions(null)
     jokesAPI.getPerformance(jokeId).then(d => { setData(d); setLoading(false) }).catch(() => setLoading(false))
   }, [jokeId])
+
+  const handleGetSuggestions = async () => {
+    setLoadingSuggestions(true)
+    const result = await jokesAPI.getRewriteSuggestions(jokeId, {
+      avgLaughs: data?.summary?.avgLaughs,
+      totalShows: data?.summary?.totalShows,
+    })
+    setSuggestions(result?.suggestions || null)
+    setLoadingSuggestions(false)
+  }
 
   if (loading) return <div className="perf-history-loading">Loading history...</div>
   if (!data || data.appearances.length === 0) {
@@ -21,6 +34,7 @@ function JokePerformanceHistory({ jokeId }) {
 
   const { appearances, summary } = data
   const trendEmoji = summary?.trend > 0 ? '📈' : summary?.trend < 0 ? '📉' : '➡️'
+  const needsWork = summary?.avgLaughs !== null && summary.avgLaughs < 2 && summary.totalShows >= 2
 
   return (
     <div className="perf-history">
@@ -48,6 +62,23 @@ function JokePerformanceHistory({ jokeId }) {
           </div>
         ))}
       </div>
+      {needsWork && !suggestions && (
+        <button
+          className="rewrite-suggestions-btn"
+          onClick={handleGetSuggestions}
+          disabled={loadingSuggestions}
+        >
+          {loadingSuggestions ? '🔄 Getting tips...' : '💡 Get Rewrite Tips'}
+        </button>
+      )}
+      {suggestions && (
+        <div className="rewrite-suggestions">
+          <h4 className="rewrite-suggestions-title">Rewrite Tips</h4>
+          <ol className="rewrite-suggestions-list">
+            {suggestions.map((s, i) => <li key={i}>{s}</li>)}
+          </ol>
+        </div>
+      )}
     </div>
   )
 }

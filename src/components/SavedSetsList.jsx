@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { setsAPI } from '../services/setsAPI'
 import './SavedSetsList.css'
 
@@ -6,6 +6,13 @@ function SavedSetsList({ onBack, onEdit }) {
   const [sets, setSets] = useState([])
   const [selectedSet, setSelectedSet] = useState(null)
   const [filter, setFilter] = useState('all') // 'all', 'draft', 'final'
+
+  // Run-through mode state
+  const [runThroughSet, setRunThroughSet] = useState(null)
+  const [runThroughIndex, setRunThroughIndex] = useState(0)
+  const [runThroughNotes, setRunThroughNotes] = useState({})
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const timerRef = useRef(null)
 
   useEffect(() => {
     loadSets()
@@ -22,6 +29,78 @@ function SavedSetsList({ onBack, onEdit }) {
       setSets([])
     }
   }
+
+  // Run-through helpers
+  const startRunThrough = (set, e) => {
+    e.stopPropagation()
+    const jokes = set.jokeDetails || []
+    // Pre-load notes from localStorage
+    const notes = {}
+    jokes.forEach(joke => {
+      const saved = localStorage.getItem(`comedica-runthrough-notes-${set.id}-${joke.id}`)
+      if (saved !== null) notes[joke.id] = saved
+    })
+    setRunThroughNotes(notes)
+    setRunThroughSet(set)
+    setRunThroughIndex(0)
+    setElapsedSeconds(0)
+
+    // Start timer
+    if (timerRef.current) clearInterval(timerRef.current)
+    timerRef.current = setInterval(() => {
+      setElapsedSeconds(s => s + 1)
+    }, 1000)
+  }
+
+  const exitRunThrough = () => {
+    if (timerRef.current) clearInterval(timerRef.current)
+    timerRef.current = null
+    setRunThroughSet(null)
+    setRunThroughIndex(0)
+    setElapsedSeconds(0)
+  }
+
+  const runThroughNext = () => {
+    if (!runThroughSet) return
+    const jokes = runThroughSet.jokeDetails || []
+    setRunThroughIndex(i => Math.min(i + 1, jokes.length - 1))
+  }
+
+  const runThroughPrev = () => {
+    setRunThroughIndex(i => Math.max(i - 1, 0))
+  }
+
+  const handleRunThroughNoteChange = (jokeId, value) => {
+    setRunThroughNotes(prev => ({ ...prev, [jokeId]: value }))
+    if (runThroughSet) {
+      localStorage.setItem(`comedica-runthrough-notes-${runThroughSet.id}-${jokeId}`, value)
+    }
+  }
+
+  const formatElapsed = (seconds) => {
+    const m = Math.floor(seconds / 60)
+    const s = seconds % 60
+    return `${m}:${String(s).padStart(2, '0')}`
+  }
+
+  // Keyboard support for run-through mode
+  useEffect(() => {
+    if (!runThroughSet) return
+    const handleKey = (e) => {
+      if (e.key === 'ArrowRight') runThroughNext()
+      else if (e.key === 'ArrowLeft') runThroughPrev()
+      else if (e.key === 'Escape') exitRunThrough()
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [runThroughSet, runThroughIndex])
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+  }, [])
 
   const handleSetClick = (set) => {
     setSelectedSet(set)
@@ -110,7 +189,7 @@ function SavedSetsList({ onBack, onEdit }) {
               >
                 <div className="set-tab-header">
                   <h3>{set.header || 'Untitled Set'}</h3>
-                  <button 
+                  <button
                     className="delete-btn"
                     onClick={(e) => handleDeleteSet(set.id, e)}
                   >
@@ -125,10 +204,19 @@ function SavedSetsList({ onBack, onEdit }) {
                   <span className="set-date">{formatDate(set.updatedAt)}</span>
                 </div>
                 <p className="set-preview">
-                  {set.jokes && set.jokes.length > 0 
+                  {set.jokes && set.jokes.length > 0
                     ? `${set.jokes.length} joke${set.jokes.length !== 1 ? 's' : ''}`
                     : 'No jokes added'}
                 </p>
+                {set.jokeDetails && set.jokeDetails.length > 0 && (
+                  <button
+                    className="runthrough-btn"
+                    onClick={(e) => startRunThrough(set, e)}
+                    title="Run Through this set"
+                  >
+                    ▶ Run Through
+                  </button>
+                )}
               </div>
             ))
           )}
@@ -180,6 +268,93 @@ function SavedSetsList({ onBack, onEdit }) {
           </div>
         )}
       </div>
+
+      {/* Run-through overlay */}
+      {runThroughSet && (() => {
+        const jokes = runThroughSet.jokeDetails || []
+        const joke = jokes[runThroughIndex]
+        if (!joke) return null
+        const sections = joke.sections || []
+        const noteValue = runThroughNotes[joke.id] || ''
+
+        return (
+          <div className="runthrough-overlay" role="dialog" aria-modal="true">
+            <div className="runthrough-topbar">
+              <span className="runthrough-set-title">{runThroughSet.header || 'Untitled Set'}</span>
+              <span className="runthrough-timer">{formatElapsed(elapsedSeconds)}</span>
+              <button className="runthrough-exit" onClick={exitRunThrough} title="Exit (Esc)">
+                ✕ Exit
+              </button>
+            </div>
+
+            <div className="runthrough-card">
+              <div className="runthrough-joke-meta">
+                Joke {runThroughIndex + 1} of {jokes.length}
+              </div>
+              <h2 className="runthrough-joke-header">{joke.header || 'Untitled Joke'}</h2>
+
+              <div className="runthrough-sections">
+                {sections.length > 0 ? (
+                  sections.map((section, idx) => (
+                    <div key={section.id || idx} className={`runthrough-section runthrough-section--${section.type}`}>
+                      <span className="runthrough-section-label">
+                        {section.type === 'context' ? 'Context' : 'Punchline'}
+                      </span>
+                      <p className="runthrough-section-text">{section.text}</p>
+                    </div>
+                  ))
+                ) : (
+                  <>
+                    {joke.context && (
+                      <div className="runthrough-section runthrough-section--context">
+                        <span className="runthrough-section-label">Context</span>
+                        <p className="runthrough-section-text">{joke.context}</p>
+                      </div>
+                    )}
+                    {joke.punchline && (
+                      <div className="runthrough-section runthrough-section--punchline">
+                        <span className="runthrough-section-label">Punchline</span>
+                        <p className="runthrough-section-text">{joke.punchline}</p>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <div className="runthrough-notes-section">
+                <label className="runthrough-notes-label">Notes for this joke</label>
+                <textarea
+                  className="runthrough-notes-input"
+                  placeholder='e.g. "slow down on punchline", "remember callback"'
+                  value={noteValue}
+                  onChange={(e) => handleRunThroughNoteChange(joke.id, e.target.value)}
+                  rows={3}
+                />
+              </div>
+            </div>
+
+            <div className="runthrough-nav">
+              <button
+                className="runthrough-nav-btn"
+                onClick={runThroughPrev}
+                disabled={runThroughIndex === 0}
+              >
+                ← Prev
+              </button>
+              <span className="runthrough-progress">
+                {runThroughIndex + 1} / {jokes.length}
+              </span>
+              <button
+                className="runthrough-nav-btn"
+                onClick={runThroughNext}
+                disabled={runThroughIndex === jokes.length - 1}
+              >
+                Next →
+              </button>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

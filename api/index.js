@@ -982,6 +982,67 @@ export default async function handler(req, res) {
       }
     }
 
+    // Rewrite suggestions endpoint
+    const jokeRewriteMatch = path.match(/^\/jokes\/([^/]+)\/rewrite-suggestions$/);
+    if (jokeRewriteMatch && method === 'POST') {
+      const jokeId = jokeRewriteMatch[1];
+      const { avgLaughs, totalShows } = body || {};
+
+      // Fetch the joke
+      const { data: jokeData, error: jokeErr } = await supabaseAdmin
+        .from('jokes').select('header, sections').eq('id', jokeId).single();
+      if (jokeErr || !jokeData) return res.status(404).json({ error: 'Joke not found' });
+
+      const jokeText = (jokeData.sections || [])
+        .map(s => `[${s.type === 'context' ? 'Setup' : 'Punchline'}] ${s.text}`)
+        .join('\n');
+
+      // Keyword-based fallback (no Groq key)
+      const keywordSuggestions = [
+        'Try cutting the setup by 30% — get to the surprising element faster',
+        'Consider flipping the structure: start with the punchline reveal, then explain why',
+        'Add a callback or tag after the main punchline to extend the laugh',
+        'Raise the stakes in your setup — make the audience care more before the twist',
+        'Test an alternate punchline that uses a more unexpected word choice',
+      ].slice(0, 3);
+
+      if (!GROQ_API_KEY) {
+        return res.json({ suggestions: keywordSuggestions, source: 'keyword' });
+      }
+
+      try {
+        const prompt = `You are an expert comedy writing coach. A comedian has a joke that averaged ${avgLaughs ?? 'very few'} laughs across ${totalShows ?? 'multiple'} shows. Help them improve it.
+
+JOKE:
+Title: "${jokeData.header}"
+${jokeText}
+
+Give exactly 3 specific, actionable rewrite suggestions. Focus on structure, timing, word choice, or surprise. Be concrete — reference the actual text. No fluff.
+
+Return ONLY a JSON array of 3 strings:
+["suggestion 1", "suggestion 2", "suggestion 3"]`;
+
+        const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_API_KEY}` },
+          body: JSON.stringify({
+            model: 'llama-3.1-8b-instant',
+            messages: [{ role: 'user', content: prompt }],
+            max_tokens: 400,
+            temperature: 0.7,
+          }),
+        });
+
+        const data = await resp.json();
+        const raw = data.choices?.[0]?.message?.content || '';
+        const match = raw.match(/\[[\s\S]*\]/);
+        const suggestions = match ? JSON.parse(match[0]) : keywordSuggestions;
+        return res.json({ suggestions: suggestions.slice(0, 3), source: 'groq' });
+      } catch (e) {
+        return res.json({ suggestions: keywordSuggestions, source: 'keyword' });
+      }
+    }
+
     // Joke performance history endpoint
     const jokePerformanceMatch = path.match(/^\/jokes\/([^/]+)\/performance$/);
     if (jokePerformanceMatch && method === 'GET') {

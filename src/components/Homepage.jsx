@@ -54,13 +54,22 @@ function Homepage() {
             <p>Upload audio and analyze performance</p>
           </button>
 
-          <button 
+          <button
             className="option-card recommendations-option"
             onClick={() => navigate('/recommendations')}
           >
             <div className="option-icon">🎯</div>
             <h2>Recommendations</h2>
             <p>AI insights on your best jokes</p>
+          </button>
+
+          <button
+            className="option-card dashboard-option"
+            onClick={() => navigate('/dashboard')}
+          >
+            <div className="option-icon">📈</div>
+            <h2>Dashboard</h2>
+            <p>Track your growth and material health</p>
           </button>
 
           <button 

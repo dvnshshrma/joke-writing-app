@@ -123,5 +123,21 @@ export const jokesAPI = {
       return { appearances: [], summary: null };
     }
   },
+
+  async getRewriteSuggestions(id, { avgLaughs, totalShows } = {}) {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE_URL}/jokes/${id}/rewrite-suggestions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ avgLaughs, totalShows }),
+      });
+      if (!response.ok) return null;
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching rewrite suggestions:', error);
+      return null;
+    }
+  },
 };
 

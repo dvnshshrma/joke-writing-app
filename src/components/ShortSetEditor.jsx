@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { jokesAPI } from '../services/api'
 import { setsAPI } from '../services/setsAPI'
 import './ShortSetEditor.css'
@@ -12,6 +12,8 @@ function ShortSetEditor({ onBack, editingSet, onSave }) {
   const [loading, setLoading] = useState(true)
   const [isDraft, setIsDraft] = useState(true)
   const [hoveredJokeId, setHoveredJokeId] = useState(null)
+  const [dismissedWarnings, setDismissedWarnings] = useState([])
+  const [warningsBannerCollapsed, setWarningsBannerCollapsed] = useState(false)
 
   useEffect(() => {
     loadJokes()
@@ -209,6 +211,59 @@ function ShortSetEditor({ onBack, editingSet, onSave }) {
     }
   }
 
+  const computeSetWarnings = (jokes) => {
+    const warnings = []
+    if (!jokes || jokes.length === 0) return warnings
+
+    // 1. Retired material
+    jokes.forEach((joke) => {
+      if (joke.lifecycle === 'retired') {
+        warnings.push(`⚠️ '${joke.header || 'Untitled Joke'}' is marked as Retired — consider removing it`)
+      }
+    })
+
+    // 2. Back-to-back topic overlap
+    const getKeywords = (text) => {
+      if (!text) return []
+      return text.split(/\s+/).filter(w => w.length >= 4).map(w => w.toLowerCase().replace(/[^a-z]/g, ''))
+    }
+    for (let i = 0; i < jokes.length - 1; i++) {
+      const wordsA = new Set(getKeywords(jokes[i].header))
+      const wordsB = getKeywords(jokes[i + 1].header)
+      const overlap = wordsB.filter(w => wordsA.has(w))
+      if (overlap.length >= 2) {
+        warnings.push(
+          `⚠️ Jokes #${i + 1} and #${i + 2} may cover similar ground: '${jokes[i].header || 'Untitled'}' / '${jokes[i + 1].header || 'Untitled'}'`
+        )
+      }
+    }
+
+    // 3. Too much new material at the start
+    const firstFour = jokes.slice(0, 4)
+    const newCount = firstFour.filter(j => j.lifecycle === 'new').length
+    if (firstFour.length >= 4 && newCount >= 3) {
+      warnings.push(`💡 Heavy new material at the start — consider warming up with a Proven joke first`)
+    }
+
+    // 4. No proven opener
+    if (jokes.length >= 2 && jokes[0].lifecycle === 'new') {
+      const provenLater = jokes.slice(1).find(j => j.lifecycle === 'proven')
+      if (provenLater) {
+        warnings.push(
+          `💡 Your first joke is new material — '${provenLater.header || 'Untitled Joke'}' (Proven) might make a stronger opener`
+        )
+      }
+    }
+
+    return warnings
+  }
+
+  const setWarnings = useMemo(() => computeSetWarnings(selectedJokes), [selectedJokes])
+
+  const activeWarnings = setWarnings
+    .map((w, i) => ({ text: w, index: i }))
+    .filter(({ index }) => !dismissedWarnings.includes(index))
+
   const renderJokePreview = (joke) => {
     const sections = joke.sections || []
     const contextSections = sections.filter(s => s.type === 'context')
@@ -314,6 +369,46 @@ function ShortSetEditor({ onBack, editingSet, onSave }) {
             />
           </label>
         </div>
+
+        {activeWarnings.length > 0 && (
+          <div className="set-warnings">
+            <div className="set-warnings-header">
+              <span className="set-warnings-title">
+                Set Intelligence ({activeWarnings.length} hint{activeWarnings.length !== 1 ? 's' : ''})
+              </span>
+              <div className="set-warnings-actions">
+                <button
+                  className="set-warnings-toggle"
+                  onClick={() => setWarningsBannerCollapsed(!warningsBannerCollapsed)}
+                >
+                  {warningsBannerCollapsed ? 'Show' : 'Hide'}
+                </button>
+                <button
+                  className="set-warnings-dismiss-all"
+                  onClick={() => setDismissedWarnings(setWarnings.map((_, i) => i))}
+                >
+                  Dismiss all
+                </button>
+              </div>
+            </div>
+            {!warningsBannerCollapsed && (
+              <ul className="set-warnings-list">
+                {activeWarnings.map(({ text, index }) => (
+                  <li key={index} className="set-warning-item">
+                    <span className="set-warning-text">{text}</span>
+                    <button
+                      className="set-warning-dismiss"
+                      onClick={() => setDismissedWarnings([...dismissedWarnings, index])}
+                      title="Dismiss"
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         <div className="joke-selection-section">
           <div className="section-header">

@@ -654,6 +654,106 @@
   line-height: 1.5;
 }
 
+/* Health Section */
+.health-section {
+  background: white;
+  border-radius: 16px;
+  padding: 1.5rem;
+}
+
+.health-section h2 {
+  margin: 0 0 0.25rem 0;
+  color: #333;
+}
+
+.health-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.health-card {
+  background: #f9f9f9;
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+}
+
+.health-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.health-header {
+  font-weight: 600;
+  color: #333;
+  font-size: 1rem;
+}
+
+.health-score-badge {
+  font-size: 1.2rem;
+  font-weight: 700;
+  padding: 0.2rem 0.6rem;
+  border-radius: 8px;
+  color: white;
+}
+
+.health-score-badge.green { background: #4caf50; }
+.health-score-badge.yellow { background: #ff9800; }
+.health-score-badge.red { background: #f44336; }
+
+.health-bar-wrap {
+  background: #e0e0e0;
+  border-radius: 6px;
+  height: 10px;
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+}
+
+.health-bar {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 0.4s ease;
+}
+
+.health-bar.green { background: linear-gradient(90deg, #66bb6a, #43a047); }
+.health-bar.yellow { background: linear-gradient(90deg, #ffa726, #fb8c00); }
+.health-bar.red { background: linear-gradient(90deg, #ef5350, #e53935); }
+
+.health-meta {
+  display: flex;
+  gap: 1.25rem;
+  font-size: 0.82rem;
+  color: #777;
+  margin-bottom: 0.4rem;
+}
+
+.health-suggestion {
+  display: inline-block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.25rem 0.65rem;
+  border-radius: 6px;
+  margin-top: 0.25rem;
+}
+
+.health-suggestion.green {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.health-suggestion.red {
+  background: #fbe9e7;
+  color: #bf360c;
+}
+
+.health-suggestion.yellow {
+  background: #fff3e0;
+  color: #e65100;
+}
+
 @media (max-width: 768px) {
   .joke-recommendations {
     padding: 1rem;
